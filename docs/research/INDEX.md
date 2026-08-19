@@ -6,7 +6,7 @@
 
 현재 연구 단계: Stage 0, Stage 1a, Stage 1b가 모두 `PASS`했고, [TASK11](TASK11.md)에서 prefix cache hit 단위를 **inner block 128 token**으로 확정했다. [TASK12](TASK12.md)에서 결정 3을 집행해 per-step decoder bucket 관측 patch를 적용·검증했고, [TASK13](TASK13.md)에서 decode step 비용을 `f(bucket) + g(actual)`로 분해했다. [TASK14](TASK14.md)에서 prefix-cache 생존 문턱을 실측하고 [TASK15](TASK15.md)에서 12/12 trial로 재현해 실제 재계산까지 확정했다. [TASK16](TASK16.md)에서 substrate descriptor와 층 태깅 규칙으로 "질문은 클래스, 상수는 인스턴스"를 코드·기록 체계에 구조화했고, [TASK17](TASK17.md)에서 agentic workload generator로 bucket 전이를 처음 관측했다.
 
-가장 최근 TASK: [TASK17](TASK17.md) — agentic workload generator v0와 bucket 전이 첫 관측 (`DONE`)
+가장 최근 TASK: [TASK18](TASK18.md) — per-request/per-session 귀속 채널 구축과 검증 게이트 (`DONE`, 게이트 통과)
 
 "가장 최근 TASK"는 번호가 가장 큰 TASK다. 그 TASK의 상태가 `BLOCKED`, `PARTIAL`, `FAILED`, `INVALID` 중 하나여서 최근 진척을 대표하지 못할 때만 아래에 "최근 완료 TASK"(가장 번호가 큰 `DONE` TASK)를 별도로 한 줄 추가한다. 두 줄이 같은 TASK를 가리키면 한 줄만 남긴다.
 
@@ -23,7 +23,7 @@ Stage 1 이후 설계에 제약이 되는 관측 (근거 [TASK06](TASK06.md), [T
 - `num_gpu_blocks`는 frontend가 EngineCore 보고값을 누적하는 구조(`vllm/v1/engine/core_client.py:712`) 때문에 EngineCore 값의 2배로 나온다([TASK09](TASK09.md)에서 해소). 실제 KV pool은 EngineCore 값이다. `"GPU KV cache size: N tokens"` log는 `num_blocks × block_size`가 아니라 `max_concurrency × max_model_len`이다.
 - 채택 가능한 관측 신호([TASK09](TASK09.md), [TASK11](TASK11.md) 감사): `vllm:num_requests_running`, `vllm:num_requests_waiting`, `vllm:kv_cache_usage_perc`(해상도는 inner block, 분모 `num_gpu_blocks−1`), `vllm:prefix_cache_queries_total`·`hits_total`·`prompt_tokens_cached_total`(전부 단위가 요청이 아니라 **token**. **`hits`는 층 1, `cached`는 층 2를 세며 두 값은 층 2가 evict된 뒤 갈라진다** — [TASK15](TASK15.md)), server 주기 로그의 `Running/Waiting/KV usage`, DEBUG 로그의 `[PFX] [CACHE-HIT]`(outer/inner block ID)와 `Allocated/Freed block(s)`. `/metrics` gauge는 반드시 in-flight로 표집하고 metric 이름은 정확히 일치시킨다.
 - **prefix cache hit 단위는 inner block 128 token**이다([TASK11](TASK11.md)). hit 양은 `floor((prompt_tokens − 1) / 128) × 128`이며 10개 조건에서 전건 일치했다. prompt가 129 token 미만이면 hit이 구조적으로 0이다. outer block 8,192은 hit 단위가 아니다.
-- **동시 workload에서는 counter 증분으로 per-request 귀속을 하지 않는다** ([TASK17](TASK17.md)). 요청 전후 `/metrics` 스크레이프 사이에 다른 요청이 진행한다. request id를 담은 `[PFX]`·`[BUCKET]` 로그만 per-request 판정에 쓴다. 동시성 1 실험(TASK14·15)에서 통하던 방법이 그대로 넘어오지 않는다.
+- **동시 workload에서는 counter 증분으로 per-request 귀속을 하지 않는다** ([TASK17](TASK17.md)). **1차 채널은 응답의 `usage.prompt_tokens_details.cached_tokens`다** — `--enable-prompt-tokens-details`를 켜면 층 2 값이 그 요청의 응답에 실려 와 귀속이 구성상 성립한다([TASK18](TASK18.md), 게이트 G1 8/8·G2 16/16·G3 일치). `[PFX]` 로그는 client id가 server id의 strict prefix라 timestamp 없이 join된다. `[BUCKET]` 로그는 step 단위 집계 전용이다.
 - **`prefix_cache_hits_total`은 실제 device 재사용의 지표가 아니다** ([TASK14](TASK14.md), [TASK15](TASK15.md) 12/12 재현). 이 metric은 층 1(vLLM inner block)의 판단이며, 층 2(RBLN outer block)가 evict된 뒤에도 hit을 계속 보고한다.
 - **층 2를 세는 Prometheus metric이 있다** ([TASK15](TASK15.md)): `vllm:prompt_tokens_cached_total`(재사용 token)과 `vllm:request_prefill_kv_computed_tokens`(실제 계산 token)가 `prefill_stats`(= `sum(cached_length)`, 층 2)에서 나온다. DEBUG 로그 없이도 층 2를 관측할 수 있다. `vllm:iteration_tokens_total`은 계산량 지표가 **아니다**(제출 prompt token을 센다). `VLLM_RBLN_METRICS` PREFILL `Total call counts`는 chunk 수가 아니라 **요청 수**다.
 - **재사용 절벽의 법칙 후보** ([TASK15](TASK15.md), 가설): 생존 ⇔ `(target 1 + gap 중 도착 요청 B + resume 1) ≤ outer_slot_count`. 이 인스턴스는 `outer_slot_count = 8`이라 `B ≤ 6`이다. **법칙의 형태는 `class`, 상수 8은 인스턴스 값**이므로 이식하지 않는다. 층 2 miss 시 resume은 prefix를 실제로 재계산한다(prefill 시간 13.1배).
@@ -34,7 +34,7 @@ Stage 1 이후 설계에 제약이 되는 관측 (근거 [TASK06](TASK06.md), [T
 
 환경 provenance `UNKNOWN` (`PARTIAL` 해소): 환경 문서 [NPU_ENVIRONMENT.md](../environment/NPU_ENVIRONMENT.md)의 hostname은 `rebel-pcie-0123`이지만 현재 관찰 hostname은 `atom-max8`이다. 두 이름이 같은 host인지, 재설치·rename·다른 장비인지는 여전히 `UNKNOWN`이다. [TASK05](TASK05.md)의 read-only 재-inventory에서 hostname을 제외한 모든 대조 항목(visible ID 수 32, card grouping 4×8, device memory 15.7 GiB, NUMA 분할, topology distance 4/8/12, RSD group 0)이 일치했으므로 해당 문서의 hardware 기술은 현재 host에서 실무상 사용할 수 있다. 다만 값 일치는 장비 동일성의 증거가 아니므로 provenance `UNKNOWN`은 유지한다.
 
-다음 권장 작업: (1) agentic vs conventional 본 비교 — 선행 조건은 runner의 request id 기록 추가와 [TASK17](TASK17.md)의 미지수 6개 반영. (2) [TASK13](TASK13.md)의 후속 — 블록 반복과 bucket **전이** 상황 측정. (3) Stage 2 repeated-prefix baseline — 설계 제약은 [TASK11](TASK11.md)·[TASK14](TASK14.md). 전부 측정이 포함되므로 선등록 후 진행한다. 사용자 지시 없이 자동 착수하지 않는다.
+다음 권장 작업: (1) AGENTIC vs CONVENTIONAL 짝 비교 — 귀속 게이트는 [TASK18](TASK18.md)에서 통과했다. (2) [TASK13](TASK13.md)의 후속 — 블록 반복과 bucket **전이** 상황 측정. (3) Stage 2 repeated-prefix baseline — 설계 제약은 [TASK11](TASK11.md)·[TASK14](TASK14.md). 전부 측정이 포함되므로 선등록 후 진행한다. 사용자 지시 없이 자동 착수하지 않는다.
 
 ## Task Index
 
@@ -56,6 +56,7 @@ Stage 1 이후 설계에 제약이 되는 관측 (근거 [TASK06](TASK06.md), [T
 | [TASK15](TASK15.md) | DONE | B = 7 절벽 재현과 resume attribution 확정 | 절벽과 metric 거짓 양성을 새 seed·12 trial에서 **12/12 결정적으로 재현**했다. 층 2 miss 시 resume이 prefix를 실제로 재계산함을 device-side prefill 시간 13.1배와 `prefill_kv_computed` 88→2,008로 확정했다(TASK14의 `UNKNOWN` 해소). 층 2를 세는 Prometheus metric이 이미 존재함을 확인했다. 선등록 1차 채널의 산술 전제가 깨져 fallback 규칙을 적용했다. |
 | [TASK16](TASK16.md) | DONE | substrate descriptor v0와 관찰 층 태깅 규칙 | `SubstrateDescriptor`(accelerator-neutral)를 신설해 모든 상수에 `Provenance`(층·출처 TASK·측정 방식)를 강제했다. RBLN CA25 인스턴스는 실측을 잔차 0.078 ms 이내로 재현하고 생존 예측이 6/6 일치한다. `TASK_GUIDE.md`에 층 태그(`silicon`/`stack`/`class`/`universal`)를 의무화하고 TASK11–15 발견 39개의 일람표를 만들었다 — 20개가 `stack` 단독이다. |
 | [TASK17](TASK17.md) | DONE | agentic workload generator v0와 bucket 전이 첫 관측 | 생성 길이를 흩뜨려 `padded_batch_size` **8 → 4 → 2 → 1** 전이를 관측했다(TASK12부터 이월된 `UNKNOWN` 해소). 사상은 TASK13 표와 전건 일치. gap 관측에서 8 세션 중 **4개만** 재사용에 성공했고 성패는 세션의 행동이 아니라 도착 순서에 좌우됐다(예측 0/8은 빗나감). 동시 workload에서 counter 증분의 per-request 귀속이 무효임을 확인했다. |
+| [TASK18](TASK18.md) | DONE | per-request/per-session 귀속 채널 구축과 검증 게이트 | `--enable-prompt-tokens-details`로 응답에 층 2 값이 실려 오게 해 **구성상 귀속**을 확보했다. 게이트 G1 8/8, G2 16/16, G3 정확 일치로 통과. client id가 server 로그 id의 strict prefix라 timestamp 정렬 없이 join된다. 8 세션 = 8 slot에서 turn 2 재사용은 2/8이었다. |
 | [TASK07](TASK07.md) | DONE | 작업 종료 시 GitHub push 확인 Workflow 도입 | 모든 작업 종료 시 `origin/main` push 여부를 반드시 사용자에게 묻고, 현재 질문에 대한 명시적 승인 후에만 push하도록 규칙을 추가했다. |
 
 ## 사용자 결정 대기
@@ -187,6 +188,7 @@ Track A를 진행할 의사가 있다면 승인을 권고한다. 변경 규모�
 - TASK15에서 그 절벽과 거짓 양성을 12/12로 재현하고 실제 재계산을 device-side 증거로 확정했으며, 층 2를 세는 Prometheus metric을 식별했다.
 - TASK16에서 substrate descriptor v0와 층 태깅 규칙을 도입해 인스턴스 상수와 클래스 사실의 혼동을 구조적으로 차단했다.
 - TASK17에서 agentic workload generator v0를 만들어 bucket 전이를 처음 관측하고, agentic gap에서 세션 절반이 prefix 재사용에 실패함을 확인했다.
+- TASK18에서 per-request 귀속 채널을 구축하고 구성상 정답이 알려진 실험으로 검증해 게이트를 통과시켰다.
 - TASK06에서 [STAGE0_PREREG.md](STAGE0_PREREG.md)로 판정 기준을 선등록한 뒤 Stage 0를 실행해 `PASS` 판정했다. `Qwen/Qwen3-4B` revision `1cfa9a72…`를 download(7.507 GiB / 66.8 s)하고 `--batch_size 1 --max_seq_len 8192 --num_devices 4`로 compile(165 s / 9.083 GiB)한 뒤 단일 inference(input 12 token, output 64 token, e2e 0.702 s)를 수행했다.
 - TASK07에서 모든 작업 종료 시 GitHub push 여부를 사용자에게 확인하는 workflow를 도입했다.
 
@@ -202,7 +204,7 @@ Track A를 진행할 의사가 있다면 승인을 권고한다. 변경 규모�
 
 ## 핵심 연구 흐름
 
-Clean-room migration 및 환경 감사 → TASK01 연구 기록 체계 → TASK02 Stage 0 사전 검증(`BLOCKED`) → TASK03 작업 종료 commit workflow → TASK04 workflow 문서 개정 → TASK05 후보 model 조사·환경 재-inventory → TASK06 Stage 0 single inference(`PASS`) → TASK07 작업 종료 push 확인 workflow → TASK08 compile 파라미터·KV accounting source 조사 → TASK09 Stage 1a serving bring-up(`PASS`) → TASK10 Stage 1b multi-bucket compile·동시성(`PASS`) → TASK11 prefix cache hit 경계 확정 → TASK12 decoder bucket 관측 patch 적용·검증 → TASK13 decode step 비용 모형 분해 → TASK14 prefix-cache 생존 문턱 실측 → TASK15 절벽 재현·재계산 attribution 확정 → TASK16 substrate descriptor·층 태깅 → TASK17 agentic workload generator·bucket 전이 관측 → Stage 2 APC OFF/ON characterization → decoder batch observation-only characterization → raw-signal feasibility
+Clean-room migration 및 환경 감사 → TASK01 연구 기록 체계 → TASK02 Stage 0 사전 검증(`BLOCKED`) → TASK03 작업 종료 commit workflow → TASK04 workflow 문서 개정 → TASK05 후보 model 조사·환경 재-inventory → TASK06 Stage 0 single inference(`PASS`) → TASK07 작업 종료 push 확인 workflow → TASK08 compile 파라미터·KV accounting source 조사 → TASK09 Stage 1a serving bring-up(`PASS`) → TASK10 Stage 1b multi-bucket compile·동시성(`PASS`) → TASK11 prefix cache hit 경계 확정 → TASK12 decoder bucket 관측 patch 적용·검증 → TASK13 decode step 비용 모형 분해 → TASK14 prefix-cache 생존 문턱 실측 → TASK15 절벽 재현·재계산 attribution 확정 → TASK16 substrate descriptor·층 태깅 → TASK17 agentic workload generator·bucket 전이 관측 → TASK18 per-request 귀속 게이트 통과 → Stage 2 APC OFF/ON characterization → decoder batch observation-only characterization → raw-signal feasibility
 
 Stage 0–2 observation baseline 전에는 scheduler policy, KEEP/OFFLOAD/RECOMPUTE 또는 host/peer KV parking을 구현하지 않는다.
 
