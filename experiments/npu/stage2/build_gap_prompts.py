@@ -56,7 +56,9 @@ def main() -> int:
     p.add_argument("--background-tokens", type=int, required=True)
     p.add_argument("--suffix-tokens", type=int, required=True)
     p.add_argument("--trials", required=True,
-                   help="comma-separated background-request counts, one trial each")
+                   help="comma-separated background-request counts")
+    p.add_argument("--replicates", type=int, default=1,
+                   help="independent trials per background count; keys become B<b>r<j>")
     p.add_argument("--base-seed", type=int, required=True)
     p.add_argument("--output", required=True, type=Path)
     args = p.parse_args()
@@ -73,8 +75,11 @@ def main() -> int:
         "base_seed": args.base_seed,
         "trials": {},
     }
-    for b in trials:
-        key = f"B{b}"
+    keys = [
+        (b, f"B{b}" if args.replicates == 1 else f"B{b}r{j}")
+        for b in trials for j in range(args.replicates)
+    ]
+    for b, key in keys:
         tgt = build_exact(tok, args.target_tokens,
                           derive_block_seed(args.base_seed, f"{key}/target"))
         suf = build_exact(tok, args.suffix_tokens,

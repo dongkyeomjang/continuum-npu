@@ -21,9 +21,18 @@ from pathlib import Path
 import sys
 
 COUNTERS = (
+    # layer 1 (vLLM inner block) view
     "vllm:prefix_cache_queries_total",
     "vllm:prefix_cache_hits_total",
+    # layer 2 (RBLN outer block) view: prefill_stats is filled from
+    # sum(cached_length), which the RBLN scheduler takes from
+    # get_matched_outer_blocks -- i.e. the outer-block match, not layer 1.
     "vllm:prompt_tokens_cached_total",
+    "vllm:request_prefill_kv_computed_tokens_sum",
+    "vllm:request_prefill_kv_computed_tokens_count",
+    # engine-level cross-checks
+    "vllm:iteration_tokens_total_sum",
+    "vllm:request_prefill_time_seconds_sum",
     "vllm:num_preemptions_total",
     "vllm:request_success_total",
     "vllm:kv_cache_usage_perc",
