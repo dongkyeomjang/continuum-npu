@@ -6,17 +6,24 @@
 
 현재 연구 단계: Stage 0 bring-up이 `PASS`했다. `Qwen/Qwen3-4B`를 download·compile하고 실제 RBLN-CA25 4 device(`rbln0`–`rbln3`, 단일 physical card)에서 batch/request = 1의 단일 inference를 수행해 NPU 실행 증거까지 관측했다. 다음 단계는 Stage 1 serving이다.
 
-가장 최근 TASK: [TASK07](TASK07.md) — 작업 종료 시 GitHub push 확인 Workflow 도입 (`DONE`)
+가장 최근 TASK: [TASK08](TASK08.md) — compile 파라미터 공간과 KV accounting source 조사 (`DONE`)
 
 "가장 최근 TASK"는 번호가 가장 큰 TASK다. 그 TASK의 상태가 `BLOCKED`, `PARTIAL`, `FAILED`, `INVALID` 중 하나여서 최근 진척을 대표하지 못할 때만 아래에 "최근 완료 TASK"(가장 번호가 큰 `DONE` TASK)를 별도로 한 줄 추가한다. 두 줄이 같은 TASK를 가리키면 한 줄만 남긴다.
 
 현재 주요 blocker: Stage 0의 model artifact blocker는 [TASK06](TASK06.md)에서 해소됐다. 미해결 사용자 결정은 현재 없다. Stage 1·Stage 2는 blocker가 아니라 아직 실행하지 않은 상태이며, 사용자 지시가 있을 때 착수한다.
 
-Stage 1 이후 설계에 제약이 되는 관측 (근거 [TASK06](TASK06.md)): 현재 compile artifact는 `batch_size=1`, `kvcache_num_blocks=1`이고 vLLM이 유도한 KV cache 규모는 8,320 token(`num_gpu_blocks=130`, `block_size=128`)이다. 동시 sequence를 담을 여유가 사실상 없으므로 multi-request KV pressure 실험은 재compile을 전제로 판단한다. Compile cost는 165 s / 9.08 GiB로 측정되어 재compile은 실질적 제약이 아니다. `enable_prefix_caching`은 지정하지 않으면 `True`로 resolve되므로 APC OFF/ON은 명시적으로 통제한다.
+Stage 1 이후 설계에 제약이 되는 관측 (근거 [TASK06](TASK06.md), [TASK08](TASK08.md)):
+
+- `attn_impl=eager` 기본값에서 KV pool 크기는 DRAM이 아니라 `batch_size`가 결정한다. `kvcache_num_blocks = (max_seq_len // kvcache_block_size) × batch_size`이고 기본값에서 `kvcache_block_size = max_seq_len`이므로 결과는 정확히 `batch_size`이며 block 1개가 sequence 1개분이다. 현재 b1 artifact의 KV pool은 sequence 1개분(8,320 token)뿐이므로 동시성 실험은 재compile을 전제로 한다.
+- decoder bucket은 자동으로 다단화되지 않는다. `decoder_batch_sizes`를 명시하지 않으면 단일 bucket이고 bucket 선택 자체가 일어나지 않는다.
+- per-step `(요청 수, 선택된 bucket)`은 기본 실행 경로에서 계산되지만 log·metric으로 노출되지 않는다. `VLLM_RBLN_DECODE_BATCH_BUCKET_*`와 `VLLM_RBLN_SUB_BLOCK_CACHE`는 기본 경로에서 무효다.
+- `num_gpu_blocks`는 frontend와 EngineCore에서 값이 달랐다(130 vs 65). frontend 값을 KV 용량 지표로 쓰지 않는다. `"GPU KV cache size: N tokens"` log는 `num_blocks × block_size`가 아니라 `max_concurrency × max_model_len`이다.
+- Compile cost는 165 s / 9.08 GiB로 측정되어 재compile은 실질적 제약이 아니다.
+- `enable_prefix_caching`은 지정하지 않으면 `True`로 resolve되므로 APC OFF/ON은 명시적으로 통제한다.
 
 환경 provenance `UNKNOWN` (`PARTIAL` 해소): 환경 문서 [NPU_ENVIRONMENT.md](../environment/NPU_ENVIRONMENT.md)의 hostname은 `rebel-pcie-0123`이지만 현재 관찰 hostname은 `atom-max8`이다. 두 이름이 같은 host인지, 재설치·rename·다른 장비인지는 여전히 `UNKNOWN`이다. [TASK05](TASK05.md)의 read-only 재-inventory에서 hostname을 제외한 모든 대조 항목(visible ID 수 32, card grouping 4×8, device memory 15.7 GiB, NUMA 분할, topology distance 4/8/12, RSD group 0)이 일치했으므로 해당 문서의 hardware 기술은 현재 host에서 실무상 사용할 수 있다. 다만 값 일치는 장비 동일성의 증거가 아니므로 provenance `UNKNOWN`은 유지한다.
 
-다음 권장 작업: Stage 1 serving과 resolved config 기록. 측정이 포함되므로 판정 기준을 먼저 선등록 commit한다. 사용자 지시 없이 자동 착수하지 않는다.
+다음 권장 작업: Stage 1a — 기존 b1 artifact로 `vllm serve` bring-up과 `/metrics` 관측 감사. 측정이 포함되므로 판정 기준을 먼저 선등록 commit한다. 사용자 지시 없이 자동 착수하지 않는다.
 
 ## Task Index
 
@@ -28,6 +35,7 @@ Stage 1 이후 설계에 제약이 되는 관측 (근거 [TASK06](TASK06.md)): �
 | [TASK04](TASK04.md) | DONE | 연구 workflow 문서 개정 | INDEX에 "사용자 결정 대기" 절을 신설하고, 선등록·동치 판정 규칙을 집행 문서의 hard rule로 승격했으며, hostname 불일치를 INDEX 수준 `UNKNOWN`으로 올렸다. |
 | [TASK05](TASK05.md) | DONE | Stage 0 후보 model 조사와 atom-max8 재-inventory | 후보 3개의 HF metadata·config·KV bytes/token·설치 source 지원 근거를 read-only로 수집해 결정 2 근거 표를 만들었다. `atom-max8` 재-inventory는 hostname을 제외한 전 항목이 환경 문서와 일치했다. |
 | [TASK06](TASK06.md) | DONE | Stage 0 실행: Qwen/Qwen3-4B download·compile·CA25 단일 추론 | 선등록한 7개 PASS 조건을 전부 충족해 Stage 0를 `PASS` 판정했다. Compile 165 s / artifact 9.08 GiB, `num_devices=4`는 단일 physical card(`rbln0`–`rbln3`)에 배치됐고 memory·utilization·context로 NPU 실행을 확인했다. |
+| [TASK08](TASK08.md) | DONE | compile 파라미터 공간과 KV accounting source 조사 | `eager`에서 `kvcache_num_blocks = batch_size`임을 source로 확정하고 TASK06의 KV accounting `UNKNOWN`을 대부분 해소했다. 문서화된 bucket 관측 지점이 기본 실행 경로 밖임을 확인하고 Stage 1b compile 파라미터 권고안과 사전 예측표를 만들었다. |
 | [TASK07](TASK07.md) | DONE | 작업 종료 시 GitHub push 확인 Workflow 도입 | 모든 작업 종료 시 `origin/main` push 여부를 반드시 사용자에게 묻고, 현재 질문에 대한 명시적 승인 후에만 push하도록 규칙을 추가했다. |
 
 ## 사용자 결정 대기
@@ -84,13 +92,15 @@ Stage 1 이후 설계에 제약이 되는 관측 (근거 [TASK06](TASK06.md)): �
 - TASK03에서 각 작업 종료 시 local `main` commit을 필수 workflow로 도입했다.
 - TASK04에서 사용자 결정 대기 절, 선등록·동치 판정 hard rule, hostname `UNKNOWN` 승격으로 연구 workflow 문서를 개정했다.
 - TASK05에서 Stage 0 후보 model metadata와 `atom-max8` hardware inventory를 read-only로 조사해 결정 2의 근거 표를 완성했다.
+- TASK08에서 optimum-rbln compile 파라미터 공간과 KV accounting을 source로 확정하고 Stage 1b 권고안을 만들었다.
 - TASK06에서 [STAGE0_PREREG.md](STAGE0_PREREG.md)로 판정 기준을 선등록한 뒤 Stage 0를 실행해 `PASS` 판정했다. `Qwen/Qwen3-4B` revision `1cfa9a72…`를 download(7.507 GiB / 66.8 s)하고 `--batch_size 1 --max_seq_len 8192 --num_devices 4`로 compile(165 s / 9.083 GiB)한 뒤 단일 inference(input 12 token, output 64 token, e2e 0.702 s)를 수행했다.
 - TASK07에서 모든 작업 종료 시 GitHub push 여부를 사용자에게 확인하는 workflow를 도입했다.
 
 ## 진행 중 또는 BLOCKED인 작업
 
 - Stage 0 single inference: [TASK06](TASK06.md)에서 `PASS`. 더 이상 진행 중이거나 blocked인 항목이 아니다.
-- Stage 1 serving: 미착수. 선행 요건은 충족됐고 사용자 지시를 기다린다.
+- Stage 1a serving bring-up: 미착수. [TASK08](TASK08.md)에서 source 조사를 마쳤고 선등록 후 실행한다.
+- Stage 1b multi-bucket compile과 동시성 진입: Stage 1a 이후. [TASK08](TASK08.md)의 권고안(`batch_size=8`, `decoder_batch_sizes=1,2,4,8`)과 사전 예측표를 사용한다.
 - Stage 2 APC OFF/ON characterization: Stage 1 미실행으로 미착수.
 - Decoder batch observation: source-level observation point는 확인했으나 per-step runtime metric은 `UNKNOWN`이며 runtime 검증 전이다.
 
@@ -119,8 +129,9 @@ Legacy GPU 연구 문서는 `docs/legacy/TASK25.md`, `TASK27.md`, `TASK29.md`, `
 
 ## 다음 작업 후보
 
-1. Stage 1 serving과 resolved config 기록. 측정이 포함되므로 판정 기준을 먼저 선등록 commit한다. 현재 artifact(`batch_size=1`, KV 8,320 token)로 어디까지 진행 가능한지의 판정을 포함한다.
-2. Stage 1 통과 후 APC OFF/ON을 독립 구성한 Stage 2 repeated-prefix baseline.
-3. baseline 통과 후 decoder bucket의 observation-only characterization.
+1. Stage 1a — 기존 b1 artifact로 `vllm serve` bring-up과 `/metrics` 관측 감사. 선등록 후 진행한다.
+2. Stage 1b — [TASK08](TASK08.md) 권고안으로 재compile하고 동시성 진입, decoder bucket 관측 가능성 판정.
+3. Stage 1 통과 후 APC OFF/ON을 독립 구성한 Stage 2 repeated-prefix baseline.
+4. baseline 통과 후 decoder bucket의 observation-only characterization.
 
 이 목록은 권고 순서다. 사용자의 지시 없이 다음 작업을 자동 시작하지 않는다.
