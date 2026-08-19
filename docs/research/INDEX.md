@@ -4,9 +4,9 @@
 
 ## 현재 상태
 
-현재 연구 단계: Stage 0, Stage 1a, Stage 1b가 모두 `PASS`했고, [TASK11](TASK11.md)에서 prefix cache hit 단위를 **inner block 128 token**으로 확정했다. [TASK12](TASK12.md)에서 결정 3을 집행해 per-step decoder bucket 관측 patch를 적용·검증했고, [TASK13](TASK13.md)에서 decode step 비용을 `f(bucket) + g(actual)`로 분해했다. [TASK14](TASK14.md)에서 prefix-cache 생존 문턱을 실측하고 [TASK15](TASK15.md)에서 12/12 trial로 재현해 실제 재계산까지 확정했다. [TASK16](TASK16.md)에서 substrate descriptor와 층 태깅 규칙으로 "질문은 클래스, 상수는 인스턴스"를 코드·기록 체계에 구조화했고, [TASK17](TASK17.md)에서 agentic workload generator로 bucket 전이를 처음 관측했다.
+현재 연구 단계: Stage 0, Stage 1a, Stage 1b가 모두 `PASS`했고, [TASK11](TASK11.md)에서 prefix cache hit 단위를 **inner block 128 token**으로 확정했다. [TASK12](TASK12.md)에서 결정 3을 집행해 per-step decoder bucket 관측 patch를 적용·검증했고, [TASK13](TASK13.md)에서 decode step 비용을 `f(bucket) + g(actual)`로 분해했다. [TASK14](TASK14.md)에서 prefix-cache 생존 문턱을 실측하고 [TASK15](TASK15.md)에서 12/12 trial로 재현해 실제 재계산까지 확정했다. [TASK16](TASK16.md)에서 substrate descriptor와 층 태깅 규칙으로 "질문은 클래스, 상수는 인스턴스"를 코드·기록 체계에 구조화했고, [TASK17](TASK17.md)에서 agentic workload generator로 bucket 전이를 처음 관측했다. [TASK18](TASK18.md)에서 per-request 귀속 게이트를 통과하고 [TASK19](TASK19.md)에서 AGENTIC vs CONVENTIONAL 첫 짝 비교를 수행했다 — **저하가 부하 수준에 의존한다**는 것이 첫 소득이다.
 
-가장 최근 TASK: [TASK18](TASK18.md) — per-request/per-session 귀속 채널 구축과 검증 게이트 (`DONE`, 게이트 통과)
+가장 최근 TASK: [TASK19](TASK19.md) — AGENTIC vs CONVENTIONAL 짝 비교 파일럿 (`DONE`)
 
 "가장 최근 TASK"는 번호가 가장 큰 TASK다. 그 TASK의 상태가 `BLOCKED`, `PARTIAL`, `FAILED`, `INVALID` 중 하나여서 최근 진척을 대표하지 못할 때만 아래에 "최근 완료 TASK"(가장 번호가 큰 `DONE` TASK)를 별도로 한 줄 추가한다. 두 줄이 같은 TASK를 가리키면 한 줄만 남긴다.
 
@@ -34,7 +34,7 @@ Stage 1 이후 설계에 제약이 되는 관측 (근거 [TASK06](TASK06.md), [T
 
 환경 provenance `UNKNOWN` (`PARTIAL` 해소): 환경 문서 [NPU_ENVIRONMENT.md](../environment/NPU_ENVIRONMENT.md)의 hostname은 `rebel-pcie-0123`이지만 현재 관찰 hostname은 `atom-max8`이다. 두 이름이 같은 host인지, 재설치·rename·다른 장비인지는 여전히 `UNKNOWN`이다. [TASK05](TASK05.md)의 read-only 재-inventory에서 hostname을 제외한 모든 대조 항목(visible ID 수 32, card grouping 4×8, device memory 15.7 GiB, NUMA 분할, topology distance 4/8/12, RSD group 0)이 일치했으므로 해당 문서의 hardware 기술은 현재 host에서 실무상 사용할 수 있다. 다만 값 일치는 장비 동일성의 증거가 아니므로 provenance `UNKNOWN`은 유지한다.
 
-다음 권장 작업: (1) AGENTIC vs CONVENTIONAL 짝 비교 — 귀속 게이트는 [TASK18](TASK18.md)에서 통과했다. (2) [TASK13](TASK13.md)의 후속 — 블록 반복과 bucket **전이** 상황 측정. (3) Stage 2 repeated-prefix baseline — 설계 제약은 [TASK11](TASK11.md)·[TASK14](TASK14.md). 전부 측정이 포함되므로 선등록 후 진행한다. 사용자 지시 없이 자동 착수하지 않는다.
+다음 권장 작업: (1) AGENTIC vs CONVENTIONAL **본 실험** — 격자 제안(N ∈ {4,6,8,10,12,16} × arm × 3블록, 고정할 것/움직일 것)은 [TASK19](TASK19.md)의 "다음 작업" 절에 있다. (2) [TASK13](TASK13.md)의 후속 — 블록 반복과 bucket **전이** 상황 측정. (3) Stage 2 repeated-prefix baseline — 설계 제약은 [TASK11](TASK11.md)·[TASK14](TASK14.md). 전부 측정이 포함되므로 선등록 후 진행한다. 사용자 지시 없이 자동 착수하지 않는다.
 
 ## Task Index
 
@@ -57,6 +57,7 @@ Stage 1 이후 설계에 제약이 되는 관측 (근거 [TASK06](TASK06.md), [T
 | [TASK16](TASK16.md) | DONE | substrate descriptor v0와 관찰 층 태깅 규칙 | `SubstrateDescriptor`(accelerator-neutral)를 신설해 모든 상수에 `Provenance`(층·출처 TASK·측정 방식)를 강제했다. RBLN CA25 인스턴스는 실측을 잔차 0.078 ms 이내로 재현하고 생존 예측이 6/6 일치한다. `TASK_GUIDE.md`에 층 태그(`silicon`/`stack`/`class`/`universal`)를 의무화하고 TASK11–15 발견 39개의 일람표를 만들었다 — 20개가 `stack` 단독이다. |
 | [TASK17](TASK17.md) | DONE | agentic workload generator v0와 bucket 전이 첫 관측 | 생성 길이를 흩뜨려 `padded_batch_size` **8 → 4 → 2 → 1** 전이를 관측했다(TASK12부터 이월된 `UNKNOWN` 해소). 사상은 TASK13 표와 전건 일치. gap 관측에서 8 세션 중 **4개만** 재사용에 성공했고 성패는 세션의 행동이 아니라 도착 순서에 좌우됐다(예측 0/8은 빗나감). 동시 workload에서 counter 증분의 per-request 귀속이 무효임을 확인했다. |
 | [TASK18](TASK18.md) | DONE | per-request/per-session 귀속 채널 구축과 검증 게이트 | `--enable-prompt-tokens-details`로 응답에 층 2 값이 실려 오게 해 **구성상 귀속**을 확보했다. 게이트 G1 8/8, G2 16/16, G3 정확 일치로 통과. client id가 server 로그 id의 strict prefix라 timestamp 정렬 없이 join된다. 8 세션 = 8 slot에서 turn 2 재사용은 2/8이었다. |
+| [TASK19](TASK19.md) | DONE | AGENTIC vs CONVENTIONAL 짝 비교 파일럿 | 1차 측정은 불변식 P1 위반으로 `INVALID` 처리하고(원인: CPython `randrange(0,1)`의 가변 비트 소비) 짝 설계를 구성 기반으로 고쳐 재등록·재측정했다. **방향이 부하에 의존한다**: N=8에서 utilization ratio 0.872(AGENTIC 12.8 % 낮음), N=16에서 1.009(저하 없음). 대기 큐가 gap을 흡수한다. 재사용률은 AGENTIC이 오히려 높았다(3/8 vs 1/8). 사전 예측 5개 중 2개만 적중. |
 | [TASK07](TASK07.md) | DONE | 작업 종료 시 GitHub push 확인 Workflow 도입 | 모든 작업 종료 시 `origin/main` push 여부를 반드시 사용자에게 묻고, 현재 질문에 대한 명시적 승인 후에만 push하도록 규칙을 추가했다. |
 
 ## 사용자 결정 대기
@@ -189,6 +190,7 @@ Track A를 진행할 의사가 있다면 승인을 권고한다. 변경 규모�
 - TASK16에서 substrate descriptor v0와 층 태깅 규칙을 도입해 인스턴스 상수와 클래스 사실의 혼동을 구조적으로 차단했다.
 - TASK17에서 agentic workload generator v0를 만들어 bucket 전이를 처음 관측하고, agentic gap에서 세션 절반이 prefix 재사용에 실패함을 확인했다.
 - TASK18에서 per-request 귀속 채널을 구축하고 구성상 정답이 알려진 실험으로 검증해 게이트를 통과시켰다.
+- TASK19에서 AGENTIC vs CONVENTIONAL 첫 짝 비교를 수행하고, agentic 저하가 부하 수준(N 대 `max_num_seqs`)에 의존함을 관측했다.
 - TASK06에서 [STAGE0_PREREG.md](STAGE0_PREREG.md)로 판정 기준을 선등록한 뒤 Stage 0를 실행해 `PASS` 판정했다. `Qwen/Qwen3-4B` revision `1cfa9a72…`를 download(7.507 GiB / 66.8 s)하고 `--batch_size 1 --max_seq_len 8192 --num_devices 4`로 compile(165 s / 9.083 GiB)한 뒤 단일 inference(input 12 token, output 64 token, e2e 0.702 s)를 수행했다.
 - TASK07에서 모든 작업 종료 시 GitHub push 여부를 사용자에게 확인하는 workflow를 도입했다.
 
@@ -204,7 +206,7 @@ Track A를 진행할 의사가 있다면 승인을 권고한다. 변경 규모�
 
 ## 핵심 연구 흐름
 
-Clean-room migration 및 환경 감사 → TASK01 연구 기록 체계 → TASK02 Stage 0 사전 검증(`BLOCKED`) → TASK03 작업 종료 commit workflow → TASK04 workflow 문서 개정 → TASK05 후보 model 조사·환경 재-inventory → TASK06 Stage 0 single inference(`PASS`) → TASK07 작업 종료 push 확인 workflow → TASK08 compile 파라미터·KV accounting source 조사 → TASK09 Stage 1a serving bring-up(`PASS`) → TASK10 Stage 1b multi-bucket compile·동시성(`PASS`) → TASK11 prefix cache hit 경계 확정 → TASK12 decoder bucket 관측 patch 적용·검증 → TASK13 decode step 비용 모형 분해 → TASK14 prefix-cache 생존 문턱 실측 → TASK15 절벽 재현·재계산 attribution 확정 → TASK16 substrate descriptor·층 태깅 → TASK17 agentic workload generator·bucket 전이 관측 → TASK18 per-request 귀속 게이트 통과 → Stage 2 APC OFF/ON characterization → decoder batch observation-only characterization → raw-signal feasibility
+Clean-room migration 및 환경 감사 → TASK01 연구 기록 체계 → TASK02 Stage 0 사전 검증(`BLOCKED`) → TASK03 작업 종료 commit workflow → TASK04 workflow 문서 개정 → TASK05 후보 model 조사·환경 재-inventory → TASK06 Stage 0 single inference(`PASS`) → TASK07 작업 종료 push 확인 workflow → TASK08 compile 파라미터·KV accounting source 조사 → TASK09 Stage 1a serving bring-up(`PASS`) → TASK10 Stage 1b multi-bucket compile·동시성(`PASS`) → TASK11 prefix cache hit 경계 확정 → TASK12 decoder bucket 관측 patch 적용·검증 → TASK13 decode step 비용 모형 분해 → TASK14 prefix-cache 생존 문턱 실측 → TASK15 절벽 재현·재계산 attribution 확정 → TASK16 substrate descriptor·층 태깅 → TASK17 agentic workload generator·bucket 전이 관측 → TASK18 per-request 귀속 게이트 통과 → TASK19 AGENTIC vs CONVENTIONAL 짝 비교 파일럿 → Stage 2 APC OFF/ON characterization → decoder batch observation-only characterization → raw-signal feasibility
 
 Stage 0–2 observation baseline 전에는 scheduler policy, KEEP/OFFLOAD/RECOMPUTE 또는 host/peer KV parking을 구현하지 않는다.
 
@@ -223,6 +225,7 @@ Legacy GPU 연구 문서는 `docs/legacy/TASK25.md`, `TASK27.md`, `TASK29.md`, `
 - 각 작업의 검증된 agent-owned 변경을 local `main`에 commit하고 commit hash를 보고한다.
 - 모든 작업 종료 시 GitHub `origin/main` push 여부를 사용자에게 묻고 현재 질문에 명시적으로 승인받은 경우에만 push한다.
 - 측정과 판정이 포함된 TASK는 판정 기준·예측·실험 격자를 측정 전에 commit하고(선등록) 사후에 기준을 완화하지 않는다.
+- 짝(paired) 설계는 난수 소비량이 아니라 **구성**으로 보장한다. 두 arm을 각각 생성하지 않고 한 plan에서 파생한다 ([TASK19](TASK19.md)). 난수 소비량 동일성을 단일 seed로 확인하지 않는다 — 확률적 소비를 하는 함수가 있다.
 - 핵심 발견에는 층 태그(`silicon` / `stack` / `class` / `universal`)를 붙인다. `class`는 형태에만 붙이고 값에는 붙이지 않으며, 근거 한 줄을 동반한다 ([TASK16](TASK16.md), [TASK_GUIDE.md](TASK_GUIDE.md)).
 - 두 조건의 동치 판정은 고정 밴드가 아니라 중앙 ratio bootstrap CI가 1을 포함하는지와 사전 등록한 CI 폭 상한으로 한다.
 
