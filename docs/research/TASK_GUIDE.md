@@ -70,6 +70,8 @@ Git commit, package version, model, relevant config, device configuration 등 �
 
 ## 핵심 발견
 
+각 항목에 층 태그(`silicon` / `stack` / `class` / `universal`)를 붙인다. 아래 "핵심 발견의 층 태그" 절 참조
+
 ## 해석
 
 파생 해석과 hypothesis를 관찰과 분리
@@ -102,6 +104,27 @@ command, config, artifact/result path, commit, version 등
 - 두 조건의 동치(equivalence) 판정은 고정 밴드가 아니라 중앙 ratio의 bootstrap CI가 1을 포함하고 CI 폭이 사전 등록한 상한 이내인지로 한다.
 - metric의 population, unit, source, device scope를 기록한다.
 - raw log 수천 줄은 TASK에 복사하지 않는다. `results/npu/...` 등의 artifact path, 핵심 measurement, 해석, 재현 방법을 기록하고 필요한 짧은 error/log만 인용한다.
+
+## 핵심 발견의 층 태그
+
+`## 핵심 발견`의 각 항목에는 **층 태그를 반드시 붙인다.** 연구 질문은 클래스 수준에서 세우고 상수는 인스턴스 수준에서 재는데, 기록에서 그 둘이 섞이면 이후 작업이 인스턴스 상수를 클래스 사실로 오해한다.
+
+| 태그 | 뜻 | 판정 기준 |
+|---|---|---|
+| `silicon` | 이 가속기 하드웨어에 고유한 값 | 다른 가속기로 바꾸면 값이 달라진다고 볼 근거가 있다. 절대 시간·대역폭·device memory 크기가 대개 여기 속한다 |
+| `stack` | 이 software stack(runtime + compiler + 그 버전)에 고유 | 같은 하드웨어라도 stack이나 compile 구성을 바꾸면 달라진다. 자료구조 크기, 정책 선택, 기본값이 여기 속한다 |
+| `class` | 이 종류의 가속기·stack 일반에 적용될 것으로 보이는 성질 | 기전이 특정 구현이 아니라 설계 범주에서 나온다. **"보일 것으로 본다"는 추론이므로 근거를 함께 적는다** |
+| `universal` | 가속기·stack과 무관한 성질 | 방법론·측정 원칙처럼 substrate가 바뀌어도 유지된다 |
+
+작성 규칙:
+
+1. 태그는 항목 앞에 굵게 표기한다. 예: `1. **stack** — FIFOEvictionPolicy가 하드코딩되어 있다.`
+2. 한 항목이 두 층에 걸치면 **둘 다** 적고 어느 부분이 어느 층인지 문장에서 구분한다. 예: 절벽의 **존재**는 `class`, slot 수 8은 `stack`.
+3. **인스턴스 상수를 클래스로 이식하지 않는다.** `class` 태그는 *형태*(법칙의 모양, 기전)에만 붙이고 *값*에는 붙이지 않는다. "outer slot이 8개다"는 절대 `class`가 아니다.
+4. `class`로 태그하려면 **왜 이 구현에 국한되지 않는지**를 한 줄로 적는다. 적을 수 없으면 `stack`이다.
+5. 태그가 나중에 틀린 것으로 드러나면 원문을 고치지 말고 후속 TASK에 정정을 기록한다.
+
+측정 substrate의 상수는 [`src/continuum/substrate/descriptor.py`](../../src/continuum/substrate/descriptor.py)의 `SubstrateDescriptor`로도 표현할 수 있다. 이 dataclass는 모든 기술 field에 `Provenance`(층·출처 TASK·측정 방식)를 요구하며 누락 시 생성이 실패한다. 인스턴스는 `experiments/` 아래에 두고 neutral 코드에는 가속기 이름을 넣지 않는다.
 
 ## INDEX 갱신
 
