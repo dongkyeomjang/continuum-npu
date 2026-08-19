@@ -33,6 +33,7 @@ from continuum.workload.agentic import (  # noqa: E402
     Distribution,
     generate_sessions,
     plan_summary,
+    zero_gaps,
 )
 
 WORDS = (
@@ -107,6 +108,9 @@ def main() -> int:
     p.add_argument("--later-segment", required=True)
     p.add_argument("--generation", required=True)
     p.add_argument("--gap", required=True)
+    p.add_argument("--zero-gaps", action="store_true",
+                   help="derive this arm from the same plan with gaps removed, "
+                        "so the paired arms differ in the gap and nothing else")
     p.add_argument("--base-seed", type=int, required=True)
     p.add_argument("--block-id", required=True)
     p.add_argument("--sampling-seed", type=int, required=True)
@@ -145,6 +149,8 @@ def main() -> int:
         base_seed=args.base_seed,
         block_id=args.block_id,
     )
+    if args.zero_gaps:
+        sessions = zero_gaps(sessions)
     if first_ladder or gen_ladder:
         from dataclasses import replace
         rebuilt = []
@@ -226,6 +232,7 @@ def main() -> int:
         "sessions": args.sessions,
         "turns": args.turns,
         "plan": plan_summary(sessions),
+        "zero_gaps": args.zero_gaps,
         "rows_file": rows_path.name,
         "started_at_utc": datetime.now(timezone.utc).isoformat(),
     }

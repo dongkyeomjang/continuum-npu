@@ -156,6 +156,33 @@ def generate_sessions(
     return sessions
 
 
+def zero_gaps(sessions: list[Session]) -> list[Session]:
+    """Return the same plans with every tool gap removed.
+
+    A paired comparison must vary the gap and nothing else. Regenerating with a
+    different gap distribution cannot guarantee that: ``Distribution.draw``
+    consumes a different, and for ``randint(a, a)`` even a *variable*, number of
+    random bits, so later draws drift apart. Deriving both arms from one plan
+    removes the possibility.
+    """
+    return [
+        Session(
+            session_id=s.session_id,
+            turns=tuple(
+                Turn(
+                    index=t.index,
+                    new_segment_tokens=t.new_segment_tokens,
+                    generation_tokens=t.generation_tokens,
+                    gap_after_s=0.0,
+                    text_seed=t.text_seed,
+                )
+                for t in s.turns
+            ),
+        )
+        for s in sessions
+    ]
+
+
 def plan_summary(sessions: list[Session]) -> dict:
     """Aggregate view used to record the requested condition of a run."""
     return {

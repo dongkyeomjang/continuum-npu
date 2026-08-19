@@ -142,3 +142,45 @@ arm별·N별 utilization/처리량/재사용률 표와 **본 실험 격자 제�
 - [TASK17](TASK17.md) — generator, bucket 전이, 발견 5
 - [TASK13](TASK13.md) — 사상표와 step 비용 모형
 - [TASK16](TASK16.md) — substrate descriptor, 층 태그
+
+---
+
+# 개정 1 — 짝 설계 방식 교체 (2026-08-19, 재측정 전)
+
+## 개정 사유
+
+위 선등록대로 1차 측정을 수행했고 **불변식 P1이 위반됐다.** 두 arm의 `generation_tokens`가 turn 2에서 달랐다.
+
+원인: `Distribution.draw`가 `uniform`에서 `rng.randint`를 호출하는데, CPython의 `randrange(0, 1)`은 `_randbelow(1)`에서 **rejection sampling 루프**를 돌아 소비 비트 수가 매번 다르다.
+
+```python
+def _randbelow_with_getrandbits(self, n):
+    if not n: return 0
+    k = n.bit_length()          # n=1 -> k=1
+    r = getrandbits(k)
+    while r >= n:               # r==1 이면 다시 뽑는다
+        r = getrandbits(k)
+    return r
+```
+
+seed 200개로 확인한 결과 `randint(0,0)` 이후 stream이 `randint(1,5)` 이후와 일치한 것은 **157/200**뿐이었다. 선등록 당시 단일 seed로 확인한 것이 우연히 일치한 경우였다.
+
+**1차 측정의 짝 비교는 선등록 규칙대로 `INVALID`다.** 판정 기준을 완화하지 않는다. 각 arm의 개별 측정치는 불변식 I1–I5를 전부 통과했으므로 **짝이 아닌 관측**으로는 유효하다.
+
+## 개정 내용
+
+rng 소비량을 맞추려는 접근을 **폐기**하고, **두 arm을 하나의 plan에서 파생**한다.
+
+- `src/continuum/workload/zero_gaps(sessions)` 신설: 같은 plan의 gap만 0으로 바꾼 사본을 돌려준다
+- `session_runner.py`에 `--zero-gaps` 추가
+- 두 arm 모두 `--gap uniform:1:5`로 **동일한 plan을 생성**하고, CONVENTIONAL만 `--zero-gaps`를 붙인다
+
+이로써 P1이 **구성상 성립**한다. 난수 소비량에 의존하지 않는다.
+
+재측정 전 확인: 같은 인자로 생성한 두 plan이 `gap_after_s`를 제외한 전 항목에서 동일함을 `plan_summary` 비교로 확인했다 (`True`).
+
+## 개정되지 않은 것
+
+관측치 정의, 불변식 I1–I5, 판정 방식(방향·ratio 점추정·분산 정보), 사전 예측 5개, 부하 구성, 실행 순서 `(CONVENTIONAL/8, CONVENTIONAL/16, AGENTIC/16, AGENTIC/8)`, seed는 **모두 그대로**다. 바뀐 것은 CONVENTIONAL arm의 plan 생성 경로뿐이다.
+
+1차 측정 결과는 후속 TASK에 `INVALID` 판정과 함께 기록하며, 재측정 결과와 나란히 보고한다.
