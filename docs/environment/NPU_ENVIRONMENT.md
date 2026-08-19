@@ -91,3 +91,45 @@ isolation invariant: PASS
 `/home/rebel/.cache/huggingface`, `/home/rebel/.cache/rebellions`, `/mnt`, `/opt`에서 depth 5까지 `rbln_config.json`, `.rbln`, `config.json`을 탐색했으나 검증된 precompiled RBLN model을 찾지 못했다. 설치 package에도 즉시 실행 가능한 example/model은 포함되지 않았다.
 
 결론: 대용량 download나 runtime compilation 승인 없이 실행할 수 있는 Stage 0 model은 **확인되지 않음**.
+
+## atom-max8 재관찰 (2026-08-19)
+
+이 절은 위 원본 조사(2026-08-18, hostname `rebel-pcie-0123`)를 수정하지 않고, 현재 host `atom-max8`에서 read-only로 재관찰한 값과 항목별 대조를 추가한다. 원본 조사 hostname과 현재 hostname의 관계는 `UNKNOWN`이며 이 절은 그 `UNKNOWN`을 해소하지 않는다. 두 조사가 같은 물리 장비인지 여부에 대한 직접 증거는 없다.
+
+- 재관찰 일시: 2026-08-19 15:55 (Asia/Seoul)
+- 재관찰 hostname: `atom-max8` (`hostname`, `hostname -f` 모두 동일)
+- 조사 원칙: read-only. RSD, driver, package, device state를 변경하지 않았다.
+- Raw 출력 경로: `results/npu/inventory/20260819-155506-atom-max8/` (`host.txt`, `lscpu.txt`, `numa-sysfs.txt`, `rbln-smi.txt`, `rbln-smi-topo.txt`, `rbln-smi-group.txt`, `rbln-smi-list.txt`). 이 경로는 `.gitignore` 대상이다.
+
+### 항목별 대조
+
+| 항목 | 문서 기재값 (`rebel-pcie-0123`, 2026-08-18) | `atom-max8` 관찰값 (2026-08-19) | 판정 |
+|---|---|---|---|
+| Hostname | `rebel-pcie-0123` | `atom-max8` | 불일치 (원인 `UNKNOWN`) |
+| OS | Ubuntu 22.04.5 LTS | Ubuntu 22.04.5 LTS | 일치 |
+| Kernel | `6.8.0-40-generic` | `6.8.0-40-generic` | 일치 |
+| Architecture | `x86_64` | `x86_64` | 일치 |
+| NPU model | RBLN-CA25 | RBLN-CA25 (32 ID 전부) | 일치 |
+| RBLN-visible device ID 수 | 32 (`rbln0`–`rbln31`) | 32 (`rbln0`–`rbln31`) | 일치 |
+| Physical card 수 / card당 ID | 8 / 4 | `rbln-smi` 출력이 4 ID씩 8개 blk으로 grouping됨 | 일치 |
+| Device memory | ID당 15.7 GiB | ID당 15.7 GiB | 일치 |
+| 조사 시 할당 / 활용률 | 전 ID 0 MiB / 0% | 전 ID `0.0B / 15.7GiB`, util `0.0`, active context 없음 | 일치 |
+| NUMA node 0 device | `rbln0`–`rbln15` | `rbln0`–`rbln15` (CPU affinity `0-23,48-71`) | 일치 |
+| NUMA node 1 device | `rbln16`–`rbln31` | `rbln16`–`rbln31` (CPU affinity `24-47,72-95`) | 일치 |
+| topology distance class | `4` 같은 card / `8` 다른 card·같은 NUMA / `12` cross-NUMA | 동일한 4/8/12 구조가 32×32 matrix 전체에서 관찰됨 | 일치 |
+| RSD group | group 0에 32 ID 전부 | `rbln-smi -g`에서 Grp `0`에 32 ID 전부 | 일치 |
+| Tool 가용성 | `rbln-smi`, `rbln-stat`, `rblnBandwidthLatencyTest` | 세 tool 모두 `/usr/bin`에 존재 | 일치 |
+| KMD version | 문서에 기재 없음 | `3.2.2` (`rbln-smi` header) | 신규 관찰 |
+
+### 문서에 없던 신규 관찰
+
+- CPU: AMD EPYC 9254 24-Core Processor, 2 socket, socket당 24 core, thread/core 2, 총 96 logical CPU.
+- NUMA memory: node0 `MemTotal` 792,385,832 kB, node1 792,615,116 kB (source: `/sys/devices/system/node/node*/meminfo`).
+- 각 NPU ID의 PCI BUS ID와 UUID를 확보했다 (`rbln-smi.txt`, `rbln-smi-list.txt`). Card 경계는 PCI bus 값에서도 4개씩 인접 구간으로 나타난다 (`05–08`, `0c–0f`, `46–49`, `4d–50`, `85–88`, `8c–8f`, `c5–c8`, `cc–cf`).
+- `numactl`은 이 host에 설치되어 있지 않다 (`command -v numactl` → 없음). NUMA 정보는 `lscpu`와 `/sys/devices/system/node`에서 얻었다.
+
+### 미해소 사항
+
+- hostname 불일치의 원인은 `UNKNOWN`이다. 위 표의 "일치" 판정은 값이 같다는 관찰일 뿐이며, 두 조사가 같은 물리 장비였음을 증명하지 않는다.
+- Host↔NPU 및 NPU↔NPU bandwidth/latency는 여전히 측정하지 않았다. topology distance 4/8/12는 구조적 값이며 성능 비균질성의 증거가 아니다. `UNKNOWN` 유지.
+- `rblnBandwidthLatencyTest`는 실행하지 않았다. RSD 변경 금지 원칙을 유지했다.
