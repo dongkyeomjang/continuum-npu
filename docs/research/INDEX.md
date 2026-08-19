@@ -4,9 +4,9 @@
 
 ## 현재 상태
 
-현재 연구 단계: Stage 0, Stage 1a, Stage 1b가 모두 `PASS`했고, [TASK11](TASK11.md)에서 prefix cache hit 단위를 **inner block 128 token**으로 확정했다. [TASK12](TASK12.md)에서 결정 3을 집행해 per-step decoder bucket 관측 patch를 적용·검증했다. Stage 2와 Track A 양쪽의 진입 조건이 갖춰졌다.
+현재 연구 단계: Stage 0, Stage 1a, Stage 1b가 모두 `PASS`했고, [TASK11](TASK11.md)에서 prefix cache hit 단위를 **inner block 128 token**으로 확정했다. [TASK12](TASK12.md)에서 결정 3을 집행해 per-step decoder bucket 관측 patch를 적용·검증했고, [TASK13](TASK13.md)에서 decode step 비용을 `f(bucket) + g(actual)`로 분해했다.
 
-가장 최근 TASK: [TASK12](TASK12.md) — 결정 3 집행: decoder bucket 관측 patch 적용과 검증 (`DONE`)
+가장 최근 TASK: [TASK13](TASK13.md) — decode step 비용 모델: bucket 결정적인가, actual 결정적인가 (`DONE`)
 
 "가장 최근 TASK"는 번호가 가장 큰 TASK다. 그 TASK의 상태가 `BLOCKED`, `PARTIAL`, `FAILED`, `INVALID` 중 하나여서 최근 진척을 대표하지 못할 때만 아래에 "최근 완료 TASK"(가장 번호가 큰 `DONE` TASK)를 별도로 한 줄 추가한다. 두 줄이 같은 TASK를 가리키면 한 줄만 남긴다.
 
@@ -18,7 +18,8 @@ Stage 1 이후 설계에 제약이 되는 관측 (근거 [TASK06](TASK06.md), [T
 
 - `attn_impl=eager` 기본값에서 KV pool 크기는 DRAM이 아니라 `batch_size`가 결정한다. `kvcache_num_blocks = (max_seq_len // kvcache_block_size) × batch_size`이고 기본값에서 `kvcache_block_size = max_seq_len`이므로 결과는 정확히 `batch_size`이며 block 1개가 sequence 1개분이다. 현재 b1 artifact의 KV pool은 sequence 1개분(8,320 token)뿐이므로 동시성 실험은 재compile을 전제로 한다.
 - decoder bucket은 자동으로 다단화되지 않는다. `decoder_batch_sizes`를 명시하지 않으면 단일 bucket이고 bucket 선택 자체가 일어나지 않는다.
-- per-step `(요청 수, 선택된 bucket)`은 upstream에서 계산만 되고 노출되지 않았으나, [TASK12](TASK12.md)의 observation-only patch가 `[BUCKET] request_nums=<n> padded_batch_size=<b>` DEBUG 로그로 노출시켰다. 관측된 사상은 `select_bucket_size` 산식과 전건 일치했다(1→1, 2→2, 3→4, 5→8, 8→8). `VLLM_RBLN_DECODE_BATCH_BUCKET_*`와 `VLLM_RBLN_SUB_BLOCK_CACHE`는 기본 경로에서 무효다.
+- per-step `(요청 수, 선택된 bucket)`은 upstream에서 계산만 되고 노출되지 않았으나, [TASK12](TASK12.md)의 observation-only patch가 `[BUCKET] request_nums=<n> padded_batch_size=<b>` DEBUG 로그로 노출시켰다. 사상표는 [TASK13](TASK13.md)에서 완성됐다: 1→1, 2→2, 3→4, 4→4, 5→8, 6→8, 7→8, 8→8.
+- **decode step 비용 모형** ([TASK13](TASK13.md)): `step_time ≈ f(bucket) + g(actual)`. `f`는 계단 함수로 model p50이 bucket 1/2/4/8에서 9.51 / 10.05 / 10.355 / 12.4025 ms이고 같은 bucket 내 범위는 0.01–0.03 ms다. `g`는 model·sampler 밖 engine overhead로 요청당 약 0.041 ms다. bucket 효과가 지배 항이므로 slot 낭비율은 시간 의미를 갖되 "bucket 한 단계 비용"으로 읽는다. `VLLM_RBLN_DECODE_BATCH_BUCKET_*`와 `VLLM_RBLN_SUB_BLOCK_CACHE`는 기본 경로에서 무효다.
 - `num_gpu_blocks`는 frontend가 EngineCore 보고값을 누적하는 구조(`vllm/v1/engine/core_client.py:712`) 때문에 EngineCore 값의 2배로 나온다([TASK09](TASK09.md)에서 해소). 실제 KV pool은 EngineCore 값이다. `"GPU KV cache size: N tokens"` log는 `num_blocks × block_size`가 아니라 `max_concurrency × max_model_len`이다.
 - 채택 가능한 관측 신호([TASK09](TASK09.md), [TASK11](TASK11.md) 감사): `vllm:num_requests_running`, `vllm:num_requests_waiting`, `vllm:kv_cache_usage_perc`(해상도는 inner block, 분모 `num_gpu_blocks−1`), `vllm:prefix_cache_queries_total`·`hits_total`·`prompt_tokens_cached_total`(전부 단위가 요청이 아니라 **token**. cached는 hits와 항상 같은 값), server 주기 로그의 `Running/Waiting/KV usage`, DEBUG 로그의 `[PFX] [CACHE-HIT]`(outer/inner block ID)와 `Allocated/Freed block(s)`. `/metrics` gauge는 반드시 in-flight로 표집하고 metric 이름은 정확히 일치시킨다.
 - **prefix cache hit 단위는 inner block 128 token**이다([TASK11](TASK11.md)). hit 양은 `floor((prompt_tokens − 1) / 128) × 128`이며 10개 조건에서 전건 일치했다. prompt가 129 token 미만이면 hit이 구조적으로 0이다. outer block 8,192은 hit 단위가 아니다.
@@ -45,6 +46,7 @@ Stage 1 이후 설계에 제약이 되는 관측 (근거 [TASK06](TASK06.md), [T
 | [TASK10](TASK10.md) | DONE | Stage 1b: multi-bucket compile과 동시성 진입, decoder bucket 관측 판정 | 선등록 3개 조건을 전부 충족해 `PASS` 판정했다. `batch_size=8`에서 `running`이 8에 도달했고 TASK08의 KV accounting 예측 9개가 전부 실측과 일치했다. compile 349 s / artifact 11.50 GiB이며 크기는 decoder bucket 개수에만 비례한다. decoder bucket의 per-step 관측은 4개 수단 모두에서 불가로 판정해 결정 3을 신설했다. |
 | [TASK11](TASK11.md) | DONE | prefix cache hit 경계와 KV block 의미론 확정 | hit 단위를 inner block 128 token으로 확정하고 산식 `floor((n−1)/128)×128`이 10개 조건에서 전건 일치함을 확인했다. TASK09·TASK10의 `hits = 0`은 prompt가 129 token 문턱 아래였기 때문이다. 선등록 예측 9개 중 8개 적중. APC OFF가 block 입도까지 바꾸는 confounder를 발견했다. |
 | [TASK12](TASK12.md) | DONE | 결정 3 집행: decoder bucket 관측 patch 적용과 검증 | `patches/` 정책의 첫 실전 적용. 검증 관문 3개(의미론 전건 일치, 관찰자 효과, 복구)를 모두 통과해 patch를 적용 상태로 유지했다. `[BUCKET]` 로그 635줄에서 사상 1→1, 2→2, 3→4, 5→8, 8→8이 전건 일치했고 bucket padding 낭비가 정량화됐다. |
+| [TASK13](TASK13.md) | DONE | decode step 비용 모델: bucket 결정적인가, actual 결정적인가 | 선등록 H(같은 bucket 내 동치)를 채널 C bootstrap에서 기각했다(동치 요구 7쌍 전부 `DIFFERENT`). 다만 비용이 분해된다: model span은 bucket 결정적(같은 bucket 내 범위 ≤ 0.03 ms), actual 의존은 engine overhead에 있고 요청당 약 0.041 ms다. bucket 효과(+4.6~17.8 %)가 actual 효과(≤ +1.2 %)를 지배한다. `[BUCKET]` 사상표 8개가 전부 채워졌다. |
 | [TASK07](TASK07.md) | DONE | 작업 종료 시 GitHub push 확인 Workflow 도입 | 모든 작업 종료 시 `origin/main` push 여부를 반드시 사용자에게 묻고, 현재 질문에 대한 명시적 승인 후에만 push하도록 규칙을 추가했다. |
 
 ## 사용자 결정 대기
@@ -171,6 +173,7 @@ Track A를 진행할 의사가 있다면 승인을 권고한다. 변경 규모�
 - TASK10에서 multi-bucket artifact로 동시 8 sequence 실행을 확인하고 Stage 1b를 `PASS` 판정했다. decoder bucket 관측이 불가임을 실행 수준에서 확인해 결정 3을 신설했다.
 - TASK11에서 prefix cache hit 단위를 inner block 128 token으로 확정하고 APC OFF/ON 통제 방식을 검증했다.
 - TASK12에서 결정 3을 집행해 decoder bucket 관측 patch를 적용·검증했다. `patches/` 정책의 첫 실전 적용이다.
+- TASK13에서 decode step 비용을 bucket 결정 항과 actual 의존 항으로 분해하고 bucket별 step 시간 상수를 확정했다.
 - TASK06에서 [STAGE0_PREREG.md](STAGE0_PREREG.md)로 판정 기준을 선등록한 뒤 Stage 0를 실행해 `PASS` 판정했다. `Qwen/Qwen3-4B` revision `1cfa9a72…`를 download(7.507 GiB / 66.8 s)하고 `--batch_size 1 --max_seq_len 8192 --num_devices 4`로 compile(165 s / 9.083 GiB)한 뒤 단일 inference(input 12 token, output 64 token, e2e 0.702 s)를 수행했다.
 - TASK07에서 모든 작업 종료 시 GitHub push 여부를 사용자에게 확인하는 workflow를 도입했다.
 
@@ -179,14 +182,14 @@ Track A를 진행할 의사가 있다면 승인을 권고한다. 변경 규모�
 - Stage 0 single inference: [TASK06](TASK06.md)에서 `PASS`. 더 이상 진행 중이거나 blocked인 항목이 아니다.
 - Stage 1a serving bring-up: [TASK09](TASK09.md)에서 `PASS`. 더 이상 진행 중이거나 blocked인 항목이 아니다.
 - Stage 1b multi-bucket compile과 동시성 진입: [TASK10](TASK10.md)에서 `PASS`.
-- Track A (decoder bucket characterization): 미착수. [TASK12](TASK12.md)에서 관측 경로가 확보됐다. bucket 전이 관측을 위해 요청별 생성 길이를 다르게 하는 격자가 필요하다.
+- Track A (decoder bucket characterization): [TASK13](TASK13.md)에서 정상 상태 비용 모형을 파일럿 수준으로 확보했다. 남은 것은 (a) 블록 반복으로 같은 bucket 내 actual 효과의 재현성 확인, (b) 요청별 생성 길이를 다르게 해 bucket **전이** 상황 관측이다.
 - Stage 2 준비: [TASK11](TASK11.md)에서 hit 단위와 APC 통제 방식을 확정했다. 설계 제약(prefix ≥ 129 token, 조건 간 prefix 오염 차단, APC OFF/ON의 block 입도 confounder 기록)은 해당 TASK에 있다.
 - Stage 2 APC OFF/ON characterization: Stage 1 미실행으로 미착수.
 - Decoder batch observation: source-level observation point는 확인했으나 per-step runtime metric은 `UNKNOWN`이며 runtime 검증 전이다.
 
 ## 핵심 연구 흐름
 
-Clean-room migration 및 환경 감사 → TASK01 연구 기록 체계 → TASK02 Stage 0 사전 검증(`BLOCKED`) → TASK03 작업 종료 commit workflow → TASK04 workflow 문서 개정 → TASK05 후보 model 조사·환경 재-inventory → TASK06 Stage 0 single inference(`PASS`) → TASK07 작업 종료 push 확인 workflow → TASK08 compile 파라미터·KV accounting source 조사 → TASK09 Stage 1a serving bring-up(`PASS`) → TASK10 Stage 1b multi-bucket compile·동시성(`PASS`) → TASK11 prefix cache hit 경계 확정 → TASK12 decoder bucket 관측 patch 적용·검증 → Stage 2 APC OFF/ON characterization → decoder batch observation-only characterization → raw-signal feasibility
+Clean-room migration 및 환경 감사 → TASK01 연구 기록 체계 → TASK02 Stage 0 사전 검증(`BLOCKED`) → TASK03 작업 종료 commit workflow → TASK04 workflow 문서 개정 → TASK05 후보 model 조사·환경 재-inventory → TASK06 Stage 0 single inference(`PASS`) → TASK07 작업 종료 push 확인 workflow → TASK08 compile 파라미터·KV accounting source 조사 → TASK09 Stage 1a serving bring-up(`PASS`) → TASK10 Stage 1b multi-bucket compile·동시성(`PASS`) → TASK11 prefix cache hit 경계 확정 → TASK12 decoder bucket 관측 patch 적용·검증 → TASK13 decode step 비용 모형 분해 → Stage 2 APC OFF/ON characterization → decoder batch observation-only characterization → raw-signal feasibility
 
 Stage 0–2 observation baseline 전에는 scheduler policy, KEEP/OFFLOAD/RECOMPUTE 또는 host/peer KV parking을 구현하지 않는다.
 
