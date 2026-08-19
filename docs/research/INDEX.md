@@ -4,9 +4,9 @@
 
 ## 현재 상태
 
-현재 연구 단계: Stage 0, Stage 1a, Stage 1b가 모두 `PASS`했고, [TASK11](TASK11.md)에서 prefix cache hit 단위를 **inner block 128 token**으로 확정했다. [TASK12](TASK12.md)에서 결정 3을 집행해 per-step decoder bucket 관측 patch를 적용·검증했고, [TASK13](TASK13.md)에서 decode step 비용을 `f(bucket) + g(actual)`로 분해했다.
+현재 연구 단계: Stage 0, Stage 1a, Stage 1b가 모두 `PASS`했고, [TASK11](TASK11.md)에서 prefix cache hit 단위를 **inner block 128 token**으로 확정했다. [TASK12](TASK12.md)에서 결정 3을 집행해 per-step decoder bucket 관측 patch를 적용·검증했고, [TASK13](TASK13.md)에서 decode step 비용을 `f(bucket) + g(actual)`로 분해했다. [TASK14](TASK14.md)에서 prefix-cache 생존 문턱을 실측해 NPU에서의 체제 경계 첫 좌표를 얻었다.
 
-가장 최근 TASK: [TASK13](TASK13.md) — decode step 비용 모델: bucket 결정적인가, actual 결정적인가 (`DONE`)
+가장 최근 TASK: [TASK14](TASK14.md) — prefix-cache block 생존/eviction 파일럿: NPU GapTurnover 첫 실측 (`DONE`)
 
 "가장 최근 TASK"는 번호가 가장 큰 TASK다. 그 TASK의 상태가 `BLOCKED`, `PARTIAL`, `FAILED`, `INVALID` 중 하나여서 최근 진척을 대표하지 못할 때만 아래에 "최근 완료 TASK"(가장 번호가 큰 `DONE` TASK)를 별도로 한 줄 추가한다. 두 줄이 같은 TASK를 가리키면 한 줄만 남긴다.
 
@@ -23,13 +23,15 @@ Stage 1 이후 설계에 제약이 되는 관측 (근거 [TASK06](TASK06.md), [T
 - `num_gpu_blocks`는 frontend가 EngineCore 보고값을 누적하는 구조(`vllm/v1/engine/core_client.py:712`) 때문에 EngineCore 값의 2배로 나온다([TASK09](TASK09.md)에서 해소). 실제 KV pool은 EngineCore 값이다. `"GPU KV cache size: N tokens"` log는 `num_blocks × block_size`가 아니라 `max_concurrency × max_model_len`이다.
 - 채택 가능한 관측 신호([TASK09](TASK09.md), [TASK11](TASK11.md) 감사): `vllm:num_requests_running`, `vllm:num_requests_waiting`, `vllm:kv_cache_usage_perc`(해상도는 inner block, 분모 `num_gpu_blocks−1`), `vllm:prefix_cache_queries_total`·`hits_total`·`prompt_tokens_cached_total`(전부 단위가 요청이 아니라 **token**. cached는 hits와 항상 같은 값), server 주기 로그의 `Running/Waiting/KV usage`, DEBUG 로그의 `[PFX] [CACHE-HIT]`(outer/inner block ID)와 `Allocated/Freed block(s)`. `/metrics` gauge는 반드시 in-flight로 표집하고 metric 이름은 정확히 일치시킨다.
 - **prefix cache hit 단위는 inner block 128 token**이다([TASK11](TASK11.md)). hit 양은 `floor((prompt_tokens − 1) / 128) × 128`이며 10개 조건에서 전건 일치했다. prompt가 129 token 미만이면 hit이 구조적으로 0이다. outer block 8,192은 hit 단위가 아니다.
+- **`prefix_cache_hits_total`은 실제 device 재사용의 지표가 아니다** ([TASK14](TASK14.md)). 이 metric은 층 1(vLLM inner block)의 판단이며, 층 2(RBLN outer block)가 evict된 뒤에도 hit을 계속 보고한다. 실제 재사용은 **`[PFX] [CACHE-HIT]` / `[CACHE-PARTIAL]` 로그로만** 판정한다.
+- **prefix cache 생존 구조** ([TASK14](TASK14.md)): 층 1은 inner block 128 token × 512개 LRU, 층 2는 outer block 8,192 token × **8개 FIFO**다(`LRUEvictionPolicy` 클래스는 존재하나 미사용). 8,192 token 이하 요청은 길이와 무관하게 outer block 1개를 쓰므로 **생존을 결정하는 것은 token 총량이 아니라 요청 개수**다. eviction은 할당 순서대로여서 가장 먼저 만들어진 target이 가장 먼저 희생된다.
 - **APC OFF/ON은 단일 인자 토글이 아니다**([TASK11](TASK11.md)). OFF에서 `block_size`가 128 → 8192, `num_gpu_blocks`가 513 → 9, KV cache size가 65,664 → 73,728 token으로 함께 바뀐다. 비교 시 이 confounder를 함께 기록한다. OFF에서는 `queries`조차 0이므로 `--no-enable-prefix-caching`으로 확실히 끌 수 있다.
 - Compile cost는 165 s / 9.08 GiB로 측정되어 재compile은 실질적 제약이 아니다.
 - `enable_prefix_caching`은 지정하지 않으면 `True`로 resolve되므로 APC OFF/ON은 명시적으로 통제한다.
 
 환경 provenance `UNKNOWN` (`PARTIAL` 해소): 환경 문서 [NPU_ENVIRONMENT.md](../environment/NPU_ENVIRONMENT.md)의 hostname은 `rebel-pcie-0123`이지만 현재 관찰 hostname은 `atom-max8`이다. 두 이름이 같은 host인지, 재설치·rename·다른 장비인지는 여전히 `UNKNOWN`이다. [TASK05](TASK05.md)의 read-only 재-inventory에서 hostname을 제외한 모든 대조 항목(visible ID 수 32, card grouping 4×8, device memory 15.7 GiB, NUMA 분할, topology distance 4/8/12, RSD group 0)이 일치했으므로 해당 문서의 hardware 기술은 현재 host에서 실무상 사용할 수 있다. 다만 값 일치는 장비 동일성의 증거가 아니므로 provenance `UNKNOWN`은 유지한다.
 
-다음 권장 작업: 두 갈래가 독립적으로 가능하다. (1) Stage 2 repeated-prefix baseline — 설계 제약은 [TASK11](TASK11.md)의 "다음 작업" 절. (2) Track A decoder bucket characterization — 진입 조건은 [TASK12](TASK12.md)에서 갖춰졌고 이월 사항은 그 TASK의 "다음 작업" 절. 둘 다 측정이 포함되므로 선등록 후 진행한다. 사용자 지시 없이 자동 착수하지 않는다.
+다음 권장 작업: (1) [TASK14](TASK14.md)의 후속 — 층 1 문턱 좁히기(B ∈ {20,24,28,32}), 층 1 hit이 실제로 재계산을 유발하는지 prefill token으로 확인, 조건당 trial 반복. (2) [TASK13](TASK13.md)의 후속 — 블록 반복과 bucket **전이** 상황 측정. (3) Stage 2 repeated-prefix baseline — 설계 제약은 [TASK11](TASK11.md)·[TASK14](TASK14.md). 전부 측정이 포함되므로 선등록 후 진행한다. 사용자 지시 없이 자동 착수하지 않는다.
 
 ## Task Index
 
@@ -47,6 +49,7 @@ Stage 1 이후 설계에 제약이 되는 관측 (근거 [TASK06](TASK06.md), [T
 | [TASK11](TASK11.md) | DONE | prefix cache hit 경계와 KV block 의미론 확정 | hit 단위를 inner block 128 token으로 확정하고 산식 `floor((n−1)/128)×128`이 10개 조건에서 전건 일치함을 확인했다. TASK09·TASK10의 `hits = 0`은 prompt가 129 token 문턱 아래였기 때문이다. 선등록 예측 9개 중 8개 적중. APC OFF가 block 입도까지 바꾸는 confounder를 발견했다. |
 | [TASK12](TASK12.md) | DONE | 결정 3 집행: decoder bucket 관측 patch 적용과 검증 | `patches/` 정책의 첫 실전 적용. 검증 관문 3개(의미론 전건 일치, 관찰자 효과, 복구)를 모두 통과해 patch를 적용 상태로 유지했다. `[BUCKET]` 로그 635줄에서 사상 1→1, 2→2, 3→4, 5→8, 8→8이 전건 일치했고 bucket padding 낭비가 정량화됐다. |
 | [TASK13](TASK13.md) | DONE | decode step 비용 모델: bucket 결정적인가, actual 결정적인가 | 선등록 H(같은 bucket 내 동치)를 채널 C bootstrap에서 기각했다(동치 요구 7쌍 전부 `DIFFERENT`). 다만 비용이 분해된다: model span은 bucket 결정적(같은 bucket 내 범위 ≤ 0.03 ms), actual 의존은 engine overhead에 있고 요청당 약 0.041 ms다. bucket 효과(+4.6~17.8 %)가 actual 효과(≤ +1.2 %)를 지배한다. `[BUCKET]` 사상표 8개가 전부 채워졌다. |
+| [TASK14](TASK14.md) | DONE | prefix-cache block 생존/eviction 파일럿: NPU GapTurnover 첫 실측 | 두 층에서 서로 다른 문턱이 나왔다. 층 2(outer block, FIFO, 8개)는 배경 요청 B=7에서 실제 재사용이 100 %→0 %로 끊기고, 층 1(inner block, LRU, 512개)은 16 < B ≤ 33이다. **7 ≤ B ≤ 16에서 `prefix_cache_hits_total`이 실제 재사용을 100 % 과대평가한다.** 생존을 결정하는 것은 token 총량이 아니라 요청 개수다. |
 | [TASK07](TASK07.md) | DONE | 작업 종료 시 GitHub push 확인 Workflow 도입 | 모든 작업 종료 시 `origin/main` push 여부를 반드시 사용자에게 묻고, 현재 질문에 대한 명시적 승인 후에만 push하도록 규칙을 추가했다. |
 
 ## 사용자 결정 대기
@@ -174,6 +177,7 @@ Track A를 진행할 의사가 있다면 승인을 권고한다. 변경 규모�
 - TASK11에서 prefix cache hit 단위를 inner block 128 token으로 확정하고 APC OFF/ON 통제 방식을 검증했다.
 - TASK12에서 결정 3을 집행해 decoder bucket 관측 patch를 적용·검증했다. `patches/` 정책의 첫 실전 적용이다.
 - TASK13에서 decode step 비용을 bucket 결정 항과 actual 의존 항으로 분해하고 bucket별 step 시간 상수를 확정했다.
+- TASK14에서 prefix-cache 생존 문턱을 두 층에서 각각 실측하고, `prefix_cache_hits_total`이 실제 재사용을 과대평가하는 구간을 발견했다.
 - TASK06에서 [STAGE0_PREREG.md](STAGE0_PREREG.md)로 판정 기준을 선등록한 뒤 Stage 0를 실행해 `PASS` 판정했다. `Qwen/Qwen3-4B` revision `1cfa9a72…`를 download(7.507 GiB / 66.8 s)하고 `--batch_size 1 --max_seq_len 8192 --num_devices 4`로 compile(165 s / 9.083 GiB)한 뒤 단일 inference(input 12 token, output 64 token, e2e 0.702 s)를 수행했다.
 - TASK07에서 모든 작업 종료 시 GitHub push 여부를 사용자에게 확인하는 workflow를 도입했다.
 
@@ -189,7 +193,7 @@ Track A를 진행할 의사가 있다면 승인을 권고한다. 변경 규모�
 
 ## 핵심 연구 흐름
 
-Clean-room migration 및 환경 감사 → TASK01 연구 기록 체계 → TASK02 Stage 0 사전 검증(`BLOCKED`) → TASK03 작업 종료 commit workflow → TASK04 workflow 문서 개정 → TASK05 후보 model 조사·환경 재-inventory → TASK06 Stage 0 single inference(`PASS`) → TASK07 작업 종료 push 확인 workflow → TASK08 compile 파라미터·KV accounting source 조사 → TASK09 Stage 1a serving bring-up(`PASS`) → TASK10 Stage 1b multi-bucket compile·동시성(`PASS`) → TASK11 prefix cache hit 경계 확정 → TASK12 decoder bucket 관측 patch 적용·검증 → TASK13 decode step 비용 모형 분해 → Stage 2 APC OFF/ON characterization → decoder batch observation-only characterization → raw-signal feasibility
+Clean-room migration 및 환경 감사 → TASK01 연구 기록 체계 → TASK02 Stage 0 사전 검증(`BLOCKED`) → TASK03 작업 종료 commit workflow → TASK04 workflow 문서 개정 → TASK05 후보 model 조사·환경 재-inventory → TASK06 Stage 0 single inference(`PASS`) → TASK07 작업 종료 push 확인 workflow → TASK08 compile 파라미터·KV accounting source 조사 → TASK09 Stage 1a serving bring-up(`PASS`) → TASK10 Stage 1b multi-bucket compile·동시성(`PASS`) → TASK11 prefix cache hit 경계 확정 → TASK12 decoder bucket 관측 patch 적용·검증 → TASK13 decode step 비용 모형 분해 → TASK14 prefix-cache 생존 문턱 실측 → Stage 2 APC OFF/ON characterization → decoder batch observation-only characterization → raw-signal feasibility
 
 Stage 0–2 observation baseline 전에는 scheduler policy, KEEP/OFFLOAD/RECOMPUTE 또는 host/peer KV parking을 구현하지 않는다.
 
