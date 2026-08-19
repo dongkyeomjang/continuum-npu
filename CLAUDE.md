@@ -14,6 +14,7 @@ Research history source of truth는 [`docs/research/INDEX.md`](docs/research/IND
 8. `git diff --check`와 문서 링크 등 필요한 검증을 수행한다.
 9. 이번 작업에서 Claude가 생성·수정한 파일만 명시적으로 stage하고 `main` branch에 commit한다.
 10. Commit hash와 남은 Git 상태를 확인한 뒤 한국어로 보고한다.
+11. 종료 보고의 마지막에 반드시 "GitHub의 `origin/main`에 push할까요?"라고 묻고 답을 기다린다.
 
 TASK 생성 기준, 번호, 상태, 문서 구조는 [`docs/research/TASK_GUIDE.md`](docs/research/TASK_GUIDE.md)가 source of truth다. 새 TASK를 기록할 때 반드시 읽는다. TASK 없이 INDEX만, 또는 TASK만 만들고 INDEX를 갱신하지 않은 상태로 끝내지 않는다. 완료 후에도 사용자의 지시 없이 다음 연구 TASK를 자동 시작하지 않는다.
 
@@ -27,7 +28,11 @@ TASK 생성 기준, 번호, 상태, 문서 구조는 [`docs/research/TASK_GUIDE.
 - Commit 전에 staged diff와 `git diff --check`를 확인한다.
 - Commit 후 hash와 `git status --short`를 확인한다.
 - Commit 실패 시 완료로 보고하지 않는다.
-- Remote `push`는 별도 사용자 지시 없이 수행하지 않는다.
+- Remote `push`는 자동 수행하지 않는다.
+- 작업 종료 보고마다 commit할 변경이 있었는지와 관계없이 반드시 GitHub `push` 여부를 사용자에게 묻는다.
+- 사용자가 현재 종료 질문에 명시적으로 승인한 경우에만 해당 local `main` commit을 `origin/main`에 push한다. 과거 승인을 현재 push 승인으로 재사용하지 않는다.
+- Push 전 remote와 대상 commit을 확인하고 push 후 local/remote ref를 확인한다.
+- Push 실패 시 원문 error와 한국어 설명을 보고한다. Force push는 별도 명시적 지시 없이는 수행하지 않는다.
 
 ## 실행 및 연구 원칙
 

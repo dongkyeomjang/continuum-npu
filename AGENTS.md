@@ -25,6 +25,7 @@ Research history source of truth는 [`docs/research/INDEX.md`](docs/research/IND
 11. `git diff --check`와 문서 링크 등 필요한 검증을 수행한다.
 12. 이번 작업에서 agent가 생성·수정한 파일만 명시적으로 stage하고 `main` branch에 commit한다.
 13. commit hash와 남은 Git 상태를 확인한 뒤 사용자에게 한국어로 결과를 보고한다.
+14. 종료 보고의 마지막에 반드시 "GitHub의 `origin/main`에 push할까요?"라고 묻고 답을 기다린다.
 
 같은 component, experiment, metric, hypothesis, blocker, baseline, artifact 또는 RBLN/vLLM 내부 API를 다루면 관련 TASK로 본다. 판단이 애매하면 INDEX에서 가장 가까운 TASK를 읽는다. 과거에 실패한 접근, 잘못된 가정, unreachable condition, semantic confounder, invalid metric으로 판정된 내용을 맥락 없이 반복하지 않는다.
 
@@ -43,7 +44,11 @@ TASK 생성 기준, 번호, 상태, 필수 구조, 동시 작업 규칙의 상�
 - Commit message는 작업 목적을 설명해야 한다.
 - Commit 후 `git status --short`와 `git rev-parse HEAD`를 확인한다.
 - Commit 실패 시 성공 또는 완료로 보고하지 않고 원인을 기록한다.
-- 이 규칙은 local `main` commit을 요구하며 remote `push`를 자동 승인하지 않는다.
+- 이 규칙은 local `main` commit을 요구한다. Remote `push`는 자동 수행하지 않는다.
+- 작업 종료 보고마다 commit할 변경이 있었는지와 관계없이 반드시 GitHub `push` 여부를 사용자에게 묻는다.
+- 사용자가 현재 종료 질문에 명시적으로 승인한 경우에만 해당 local `main` commit을 `origin/main`에 push한다. 과거 승인이나 일반적 선호를 현재 push 승인으로 재사용하지 않는다.
+- Push 전 remote와 대상 commit을 확인하고, push 후 local/remote ref를 확인해 결과를 보고한다.
+- Push가 실패하면 원문 error를 보존하고 한국어로 원인을 설명한다. Force push는 별도 명시적 지시 없이는 수행하지 않는다.
 
 ## Runtime 경계
 

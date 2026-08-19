@@ -111,4 +111,6 @@ command, config, artifact/result path, commit, version 등
 
 ## 작업 종료 commit
 
-각 작업의 검증된 변경은 local `main` branch에 commit해야 완료된다. Agent가 이번 작업에서 생성·수정한 파일만 명시적으로 stage하며 기존 사용자/다른 agent 변경, secret, raw result, ignored artifact는 포함하지 않는다. 의미 있는 TASK와 INDEX 갱신은 해당 구현·연구 변경과 같은 commit에 포함한다. Commit 후 hash와 남은 Git 상태를 보고한다. Remote `push`는 별도 지시 없이는 수행하지 않는다.
+각 작업의 검증된 변경은 local `main` branch에 commit해야 완료된다. Agent가 이번 작업에서 생성·수정한 파일만 명시적으로 stage하며 기존 사용자/다른 agent 변경, secret, raw result, ignored artifact는 포함하지 않는다. 의미 있는 TASK와 INDEX 갱신은 해당 구현·연구 변경과 같은 commit에 포함한다. Commit 후 hash와 남은 Git 상태를 보고한다.
+
+작업 종료 보고마다 commit할 변경이 있었는지와 관계없이 반드시 사용자에게 "GitHub의 `origin/main`에 push할까요?"라고 묻고 답을 기다린다. Remote `push`는 자동 수행하지 않으며 사용자가 현재 질문에 명시적으로 승인한 경우에만 해당 local `main` commit을 push한다. 과거 승인이나 일반적 선호를 현재 push 승인으로 재사용하지 않는다. Push 전 remote와 대상 commit을 확인하고 push 후 local/remote ref를 확인한다. Force push는 별도 명시적 지시 없이는 수행하지 않는다.
