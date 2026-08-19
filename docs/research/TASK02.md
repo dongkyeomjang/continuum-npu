@@ -2,7 +2,9 @@
 
 ## 상태
 
-BLOCKED
+SUPERSEDED
+
+이 TASK는 model artifact 부재로 `BLOCKED`로 종료됐다. 해당 blocker는 [TASK06](TASK06.md)의 실제 download·compile·inference로 해소됐고, Stage 0 bring-up 검증은 TASK06이 대체한다. 아래 본문은 당시 관찰 기록 그대로 보존한다.
 
 ## 날짜
 

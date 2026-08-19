@@ -4,31 +4,34 @@
 
 ## 현재 상태
 
-현재 연구 단계: clean-room migration과 NPU 환경·이식 준비도 감사를 완료했고 Stage 0 bring-up 사전 검증을 수행했다. Source isolation과 CA25 idle inventory는 확인했으나 실제 inference는 실행하지 못했다.
+현재 연구 단계: Stage 0 bring-up이 `PASS`했다. `Qwen/Qwen3-4B`를 download·compile하고 실제 RBLN-CA25 4 device(`rbln0`–`rbln3`, 단일 physical card)에서 batch/request = 1의 단일 inference를 수행해 NPU 실행 증거까지 관측했다. 다음 단계는 Stage 1 serving이다.
 
-가장 최근 TASK: [TASK05](TASK05.md) — Stage 0 후보 model metadata 조사와 `atom-max8` read-only 재-inventory (`DONE`)
+가장 최근 TASK: [TASK06](TASK06.md) — Stage 0 실행: `Qwen/Qwen3-4B` download·compile·CA25 단일 추론 (`DONE`)
 
 "가장 최근 TASK"는 번호가 가장 큰 TASK다. 그 TASK의 상태가 `BLOCKED`, `PARTIAL`, `FAILED`, `INVALID` 중 하나여서 최근 진척을 대표하지 못할 때만 아래에 "최근 완료 TASK"(가장 번호가 큰 `DONE` TASK)를 별도로 한 줄 추가한다. 두 줄이 같은 TASK를 가리키면 한 줄만 남긴다.
 
-현재 주요 blocker: Stage 0는 실행 가능한 model artifact 부재로 `BLOCKED`이고, Stage 1·Stage 2는 Stage 0 선행 요건 미충족으로 `BLOCKED`다. 해소는 사용자 판정에 달려 있으므로 상세 선택지와 근거는 아래 [사용자 결정 대기](#사용자-결정-대기) 절을 단일 출처로 삼는다. 이 문단에 선택지를 중복 서술하지 않는다.
+현재 주요 blocker: Stage 0의 model artifact blocker는 [TASK06](TASK06.md)에서 해소됐다. 미해결 사용자 결정은 현재 없다. Stage 1·Stage 2는 blocker가 아니라 아직 실행하지 않은 상태이며, 사용자 지시가 있을 때 착수한다.
+
+Stage 1 이후 설계에 제약이 되는 관측 (근거 [TASK06](TASK06.md)): 현재 compile artifact는 `batch_size=1`, `kvcache_num_blocks=1`이고 vLLM이 유도한 KV cache 규모는 8,320 token(`num_gpu_blocks=130`, `block_size=128`)이다. 동시 sequence를 담을 여유가 사실상 없으므로 multi-request KV pressure 실험은 재compile을 전제로 판단한다. Compile cost는 165 s / 9.08 GiB로 측정되어 재compile은 실질적 제약이 아니다. `enable_prefix_caching`은 지정하지 않으면 `True`로 resolve되므로 APC OFF/ON은 명시적으로 통제한다.
 
 환경 provenance `UNKNOWN` (`PARTIAL` 해소): 환경 문서 [NPU_ENVIRONMENT.md](../environment/NPU_ENVIRONMENT.md)의 hostname은 `rebel-pcie-0123`이지만 현재 관찰 hostname은 `atom-max8`이다. 두 이름이 같은 host인지, 재설치·rename·다른 장비인지는 여전히 `UNKNOWN`이다. [TASK05](TASK05.md)의 read-only 재-inventory에서 hostname을 제외한 모든 대조 항목(visible ID 수 32, card grouping 4×8, device memory 15.7 GiB, NUMA 분할, topology distance 4/8/12, RSD group 0)이 일치했으므로 해당 문서의 hardware 기술은 현재 host에서 실무상 사용할 수 있다. 다만 값 일치는 장비 동일성의 증거가 아니므로 provenance `UNKNOWN`은 유지한다.
 
-다음 권장 작업: 결정 2가 판정 완료됐으므로 [STAGE0_PREREG.md](STAGE0_PREREG.md)에 고정한 절차와 판정 기준에 따라 Stage 0를 실행한다.
+다음 권장 작업: Stage 1 serving과 resolved config 기록. 측정이 포함되므로 판정 기준을 먼저 선등록 commit한다. 사용자 지시 없이 자동 착수하지 않는다.
 
 ## Task Index
 
 | Task | 상태 | 제목 | 간략 설명 |
 |---|---|---|---|
 | [TASK01](TASK01.md) | DONE | 연구 작업 기록 및 Agent Workflow 구축 | INDEX-first workflow와 TASK 기반 연구 이력을 도입했다. 모든 agent가 관련 과거 결정을 확인하고 TASK와 INDEX를 함께 갱신하도록 규칙을 통합했다. |
-| [TASK02](TASK02.md) | BLOCKED | Stage 0 CA25 단일 추론 Bring-up 사전 검증 | Source isolation과 8 physical CA25 card/32 visible ID inventory를 재검증했다. 실행 가능한 local model/artifact가 없어 승인 필요한 download/compile 전에 중단했다. |
+| [TASK02](TASK02.md) | SUPERSEDED | Stage 0 CA25 단일 추론 Bring-up 사전 검증 | Source isolation과 8 physical CA25 card/32 visible ID inventory를 재검증했다. 실행 가능한 local model/artifact가 없어 승인 필요한 download/compile 전에 중단했다. 이 `BLOCKED`는 [TASK06](TASK06.md)의 실제 실행으로 해소됐다. |
 | [TASK03](TASK03.md) | DONE | 작업 종료 시 main commit Workflow 도입 | 각 작업의 검증된 agent-owned 변경을 local `main`에 commit하고 hash를 보고하도록 종료 규칙을 강화했다. Remote `push`는 별도 지시 대상으로 유지했다. |
 | [TASK04](TASK04.md) | DONE | 연구 workflow 문서 개정 | INDEX에 "사용자 결정 대기" 절을 신설하고, 선등록·동치 판정 규칙을 집행 문서의 hard rule로 승격했으며, hostname 불일치를 INDEX 수준 `UNKNOWN`으로 올렸다. |
 | [TASK05](TASK05.md) | DONE | Stage 0 후보 model 조사와 atom-max8 재-inventory | 후보 3개의 HF metadata·config·KV bytes/token·설치 source 지원 근거를 read-only로 수집해 결정 2 근거 표를 만들었다. `atom-max8` 재-inventory는 hostname을 제외한 전 항목이 환경 문서와 일치했다. |
+| [TASK06](TASK06.md) | DONE | Stage 0 실행: Qwen/Qwen3-4B download·compile·CA25 단일 추론 | 선등록한 7개 PASS 조건을 전부 충족해 Stage 0를 `PASS` 판정했다. Compile 165 s / artifact 9.08 GiB, `num_devices=4`는 단일 physical card(`rbln0`–`rbln3`)에 배치됐고 memory·utilization·context로 NPU 실행을 확인했다. |
 
 ## 사용자 결정 대기
 
-이 절은 agent가 임의로 진행할 수 없고 사용자 판정이 필요한 결정의 단일 출처다. 각 항목은 결정 ID, 질문, 선택지, 선택지별 근거·비용·미지수, 권고안, 관련 TASK를 갖는다. 권고안은 제안일 뿐이며 판정은 사용자가 한다. 결정이 내려지면 항목을 "해소됨"으로 표시하고 근거 TASK를 링크한다.
+이 절은 agent가 임의로 진행할 수 없고 사용자 판정이 필요한 결정의 단일 출처다. 현재 미해결 항목은 없다. 각 항목은 결정 ID, 질문, 선택지, 선택지별 근거·비용·미지수, 권고안, 관련 TASK를 갖는다. 권고안은 제안일 뿐이며 판정은 사용자가 한다. 결정이 내려지면 항목을 "해소됨"으로 표시하고 근거 TASK를 링크한다.
 
 ### 결정 2 — Stage 0 대상 model의 download/compile 승인
 
@@ -80,17 +83,18 @@
 - TASK03에서 각 작업 종료 시 local `main` commit을 필수 workflow로 도입했다.
 - TASK04에서 사용자 결정 대기 절, 선등록·동치 판정 hard rule, hostname `UNKNOWN` 승격으로 연구 workflow 문서를 개정했다.
 - TASK05에서 Stage 0 후보 model metadata와 `atom-max8` hardware inventory를 read-only로 조사해 결정 2의 근거 표를 완성했다.
+- TASK06에서 [STAGE0_PREREG.md](STAGE0_PREREG.md)로 판정 기준을 선등록한 뒤 Stage 0를 실행해 `PASS` 판정했다. `Qwen/Qwen3-4B` revision `1cfa9a72…`를 download(7.507 GiB / 66.8 s)하고 `--batch_size 1 --max_seq_len 8192 --num_devices 4`로 compile(165 s / 9.083 GiB)한 뒤 단일 inference(input 12 token, output 64 token, e2e 0.702 s)를 수행했다.
 
 ## 진행 중 또는 BLOCKED인 작업
 
-- Stage 0 single inference: local weight/검증된 precompiled RBLN model artifact 부재와 download/compile 미승인으로 `BLOCKED`. 기본 vLLM 경로가 optimum-rbln의 `rbln_config.json`을 요구한다는 점을 TASK05에서 source 수준으로 재확인했다.
-- Stage 1 serving: Stage 0 선행 요건 미충족으로 `BLOCKED`.
-- Stage 2 APC OFF/ON characterization: Stage 1 미실행으로 `BLOCKED`.
+- Stage 0 single inference: [TASK06](TASK06.md)에서 `PASS`. 더 이상 진행 중이거나 blocked인 항목이 아니다.
+- Stage 1 serving: 미착수. 선행 요건은 충족됐고 사용자 지시를 기다린다.
+- Stage 2 APC OFF/ON characterization: Stage 1 미실행으로 미착수.
 - Decoder batch observation: source-level observation point는 확인했으나 per-step runtime metric은 `UNKNOWN`이며 runtime 검증 전이다.
 
 ## 핵심 연구 흐름
 
-Clean-room migration 및 환경 감사 → TASK01 연구 기록 체계 → TASK02 Stage 0 사전 검증(`BLOCKED`) → TASK03 작업 종료 commit workflow → TASK04 workflow 문서 개정 → TASK05 후보 model 조사·환경 재-inventory → Stage 0 single inference → Stage 1 serving/config 검증 → Stage 2 APC OFF/ON characterization → decoder batch observation-only characterization → raw-signal feasibility
+Clean-room migration 및 환경 감사 → TASK01 연구 기록 체계 → TASK02 Stage 0 사전 검증(`BLOCKED`) → TASK03 작업 종료 commit workflow → TASK04 workflow 문서 개정 → TASK05 후보 model 조사·환경 재-inventory → TASK06 Stage 0 single inference(`PASS`) → Stage 1 serving/config 검증 → Stage 2 APC OFF/ON characterization → decoder batch observation-only characterization → raw-signal feasibility
 
 Stage 0–2 observation baseline 전에는 scheduler policy, KEEP/OFFLOAD/RECOMPUTE 또는 host/peer KV parking을 구현하지 않는다.
 
@@ -112,10 +116,8 @@ Legacy GPU 연구 문서는 `docs/legacy/TASK25.md`, `TASK27.md`, `TASK29.md`, `
 
 ## 다음 작업 후보
 
-1. 사용자가 [사용자 결정 대기](#사용자-결정-대기)의 결정 2를 판정한다.
-2. 판정에 따라 model download/compile을 수행한 뒤 Stage 0 source-isolated single inference. 측정이 포함되므로 판정 기준을 먼저 선등록 commit한다.
-3. Stage 0 통과 후 Stage 1 serving과 resolved config 기록.
-4. Stage 1 통과 후 APC OFF/ON을 독립 구성한 Stage 2 repeated-prefix baseline.
-5. baseline 통과 후 decoder bucket의 observation-only characterization.
+1. Stage 1 serving과 resolved config 기록. 측정이 포함되므로 판정 기준을 먼저 선등록 commit한다. 현재 artifact(`batch_size=1`, KV 8,320 token)로 어디까지 진행 가능한지의 판정을 포함한다.
+2. Stage 1 통과 후 APC OFF/ON을 독립 구성한 Stage 2 repeated-prefix baseline.
+3. baseline 통과 후 decoder bucket의 observation-only characterization.
 
 이 목록은 권고 순서다. 사용자의 지시 없이 다음 작업을 자동 시작하지 않는다.
