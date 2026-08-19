@@ -1,0 +1,18 @@
+--- a/vllm_rbln/model_executor/models/optimum/model_base.py
++++ b/vllm_rbln/model_executor/models/optimum/model_base.py
+@@ -391,6 +391,15 @@
+                     padded_batch_size = select_bucket_size(
+                         request_nums, self.decoder_batch_sizes
+                     )
++                # [continuum-npu observation patch] Emit the per-step decode
++                # batch and the bucket chosen for it. Read-only: it reads
++                # values this function already computed and changes no control
++                # flow, scheduling, batch selection, or KV allocation.
++                logger.debug(
++                    "[BUCKET] request_nums=%s padded_batch_size=%s",
++                    input_ids.shape[0] if input_ids is not None else None,
++                    padded_batch_size,
++                )
+ 
+             input_ids, cache_position, block_tables = self.pad_decoder_items(
+                 input_ids,
