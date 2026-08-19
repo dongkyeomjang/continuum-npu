@@ -4,13 +4,13 @@
 
 ## 현재 상태
 
-현재 연구 단계: Stage 0와 Stage 1a가 `PASS`했다. `Qwen/Qwen3-4B` b1 artifact로 `vllm serve`를 기동해 OpenAI-compatible 요청·streaming·동시 요청을 관측하고 `/metrics` 신호를 감사했다. 다음 단계는 Stage 1b — multi-bucket 재compile과 동시성 진입이다.
+현재 연구 단계: Stage 0, Stage 1a, Stage 1b가 모두 `PASS`했다. `batch_size=8`, `decoder_batch_sizes=[8,4,2,1]` artifact로 동시 8 sequence 실행을 확인했고([TASK10](TASK10.md)), KV accounting 예측 9개가 전부 실측과 일치했다. 다만 decoder bucket의 per-step 관측은 불가로 판정되어 아래 [사용자 결정 대기](#사용자-결정-대기)의 **결정 3**이 열려 있다.
 
-가장 최근 TASK: [TASK09](TASK09.md) — Stage 1a: b1 artifact serving bring-up과 관측 감사 (`DONE`, 판정 `PASS`)
+가장 최근 TASK: [TASK10](TASK10.md) — Stage 1b: multi-bucket compile과 동시성 진입, decoder bucket 관측 판정 (`DONE`, 판정 `PASS`)
 
 "가장 최근 TASK"는 번호가 가장 큰 TASK다. 그 TASK의 상태가 `BLOCKED`, `PARTIAL`, `FAILED`, `INVALID` 중 하나여서 최근 진척을 대표하지 못할 때만 아래에 "최근 완료 TASK"(가장 번호가 큰 `DONE` TASK)를 별도로 한 줄 추가한다. 두 줄이 같은 TASK를 가리키면 한 줄만 남긴다.
 
-현재 주요 blocker: Stage 0의 model artifact blocker는 [TASK06](TASK06.md)에서 해소됐다. 미해결 사용자 결정은 현재 없다. Stage 1·Stage 2는 blocker가 아니라 아직 실행하지 않은 상태이며, 사용자 지시가 있을 때 착수한다.
+현재 주요 blocker: Stage 0–1b의 실행 blocker는 모두 해소됐다. 남은 미해결 결정은 아래 [사용자 결정 대기](#사용자-결정-대기)의 **결정 3**(decoder bucket 관측용 observation-only patch 승인) 하나이며, 이는 Track A(bucket characterization)의 gate다. Stage 2는 blocker가 아니라 아직 실행하지 않은 상태다.
 
 Stage 1 이후 설계에 제약이 되는 관측 (근거 [TASK06](TASK06.md), [TASK08](TASK08.md)):
 
@@ -24,7 +24,7 @@ Stage 1 이후 설계에 제약이 되는 관측 (근거 [TASK06](TASK06.md), [T
 
 환경 provenance `UNKNOWN` (`PARTIAL` 해소): 환경 문서 [NPU_ENVIRONMENT.md](../environment/NPU_ENVIRONMENT.md)의 hostname은 `rebel-pcie-0123`이지만 현재 관찰 hostname은 `atom-max8`이다. 두 이름이 같은 host인지, 재설치·rename·다른 장비인지는 여전히 `UNKNOWN`이다. [TASK05](TASK05.md)의 read-only 재-inventory에서 hostname을 제외한 모든 대조 항목(visible ID 수 32, card grouping 4×8, device memory 15.7 GiB, NUMA 분할, topology distance 4/8/12, RSD group 0)이 일치했으므로 해당 문서의 hardware 기술은 현재 host에서 실무상 사용할 수 있다. 다만 값 일치는 장비 동일성의 증거가 아니므로 provenance `UNKNOWN`은 유지한다.
 
-다음 권장 작업: Stage 1b — [TASK08](TASK08.md) 권고안으로 재compile하고 동시성에 진입해 decoder bucket 관측 가능성을 판정한다. 측정이 포함되므로 판정 기준을 먼저 선등록 commit한다. 사용자 지시 없이 자동 착수하지 않는다.
+다음 권장 작업: (1) 사용자가 결정 3을 판정한다. (2) 그와 독립적으로 prefix cache hit의 block 경계 단위(inner 128 token인지 outer 8,192 token인지)를 확정한다 — Stage 2 repeated-prefix 설계의 전제이며 재compile이 필요 없다. 측정이 포함되므로 선등록 후 진행한다. 사용자 지시 없이 자동 착수하지 않는다.
 
 ## Task Index
 
@@ -38,11 +38,76 @@ Stage 1 이후 설계에 제약이 되는 관측 (근거 [TASK06](TASK06.md), [T
 | [TASK06](TASK06.md) | DONE | Stage 0 실행: Qwen/Qwen3-4B download·compile·CA25 단일 추론 | 선등록한 7개 PASS 조건을 전부 충족해 Stage 0를 `PASS` 판정했다. Compile 165 s / artifact 9.08 GiB, `num_devices=4`는 단일 physical card(`rbln0`–`rbln3`)에 배치됐고 memory·utilization·context로 NPU 실행을 확인했다. |
 | [TASK08](TASK08.md) | DONE | compile 파라미터 공간과 KV accounting source 조사 | `eager`에서 `kvcache_num_blocks = batch_size`임을 source로 확정하고 TASK06의 KV accounting `UNKNOWN`을 대부분 해소했다. 문서화된 bucket 관측 지점이 기본 실행 경로 밖임을 확인하고 Stage 1b compile 파라미터 권고안과 사전 예측표를 만들었다. |
 | [TASK09](TASK09.md) | DONE | Stage 1a: b1 artifact serving bring-up과 관측 감사 | 선등록 5개 조건을 전부 충족해 `PASS` 판정했다. `num_gpu_blocks` 2배 anomaly를 frontend 누적 구조로 해소하고 KV·큐 metric의 live 여부를 in-flight 표집으로 감사했다. b1 artifact는 동시 요청을 거부하지 않고 큐에 세운다(`running` 최대 1, `waiting` 최대 2). |
+| [TASK10](TASK10.md) | DONE | Stage 1b: multi-bucket compile과 동시성 진입, decoder bucket 관측 판정 | 선등록 3개 조건을 전부 충족해 `PASS` 판정했다. `batch_size=8`에서 `running`이 8에 도달했고 TASK08의 KV accounting 예측 9개가 전부 실측과 일치했다. compile 349 s / artifact 11.50 GiB이며 크기는 decoder bucket 개수에만 비례한다. decoder bucket의 per-step 관측은 4개 수단 모두에서 불가로 판정해 결정 3을 신설했다. |
 | [TASK07](TASK07.md) | DONE | 작업 종료 시 GitHub push 확인 Workflow 도입 | 모든 작업 종료 시 `origin/main` push 여부를 반드시 사용자에게 묻고, 현재 질문에 대한 명시적 승인 후에만 push하도록 규칙을 추가했다. |
 
 ## 사용자 결정 대기
 
-이 절은 agent가 임의로 진행할 수 없고 사용자 판정이 필요한 결정의 단일 출처다. 현재 미해결 항목은 없다. 각 항목은 결정 ID, 질문, 선택지, 선택지별 근거·비용·미지수, 권고안, 관련 TASK를 갖는다. 권고안은 제안일 뿐이며 판정은 사용자가 한다. 결정이 내려지면 항목을 "해소됨"으로 표시하고 근거 TASK를 링크한다.
+이 절은 agent가 임의로 진행할 수 없고 사용자 판정이 필요한 결정의 단일 출처다. 현재 미해결 항목은 **결정 3** 하나다. 각 항목은 결정 ID, 질문, 선택지, 선택지별 근거·비용·미지수, 권고안, 관련 TASK를 갖는다. 권고안은 제안일 뿐이며 판정은 사용자가 한다. 결정이 내려지면 항목을 "해소됨"으로 표시하고 근거 TASK를 링크한다.
+
+### 결정 3 — decoder bucket 관측용 hash-guarded observation-only patch 승인
+
+- 상태: `대기` (근거 수집 완료, 사용자 판정 필요)
+- 질문: 기본 실행 경로의 per-step `(실제 요청 수, 선택된 decoder bucket)`을 관측하기 위해, `patches/` 정책을 따르는 hash-guarded **observation-only** patch를 승인할 것인가?
+- 관련 TASK: [TASK08](TASK08.md)(source 근거), [TASK10](TASK10.md)(실행 수준 확인)
+- 근거: [TASK10](TASK10.md) "핵심 산출". 선등록에서 한정한 4개 수단을 모두 검색했으나 노출 경로가 없었다. Patch는 작성하지도 적용하지도 않았다.
+
+**왜 필요한가**
+
+Track A(decoder bucket characterization)는 "요청 수가 N일 때 어느 bucket이 선택되고 그 padding 낭비가 얼마인가"를 대상으로 한다. 이 값이 관측되지 않으면 Track A는 성립하지 않는다.
+
+**관측 불가의 근거 (4개 수단 전부 검색)**
+
+| 수단 | 결과 |
+|---|---|
+| `VLLM_LOGGING_LEVEL=DEBUG` server 로그 911줄 | 기동 시점의 정적 목록(`Bucket sizes for RBLN sampler: (1, 2, 4, 8)`)과 warm-up dummy compile 로그만 존재. 서비스 구간에는 request 단위 block 할당·해제 로그만 있고 step 단위 batch 정보 없음 |
+| `/metrics` 122개 항목 | `bucket` 매칭은 전부 Prometheus histogram bucket. batch·decoder 관련 항목 없음 |
+| `VLLM_RBLN_METRICS=1` | `PREFILL` / `DECODE` / `PADDED DECODE` 절의 latency 통계만. `PADDED DECODE`는 `StepReport.padded_decode`를 `True`로 설정하는 caller가 package 전체에 없어 항상 비어 있음 |
+| 기타 read-only 경로 | 기동 시 config dump와 `rbln_config.json`은 정적 bucket 목록 |
+
+**Patch 대상 (제안, 미작성)**
+
+| 항목 | 내용 |
+|---|---|
+| 대상 package | `vllm-rbln 0.11.1` (site-packages) |
+| 대상 파일 | `vllm_rbln/model_executor/models/optimum/model_base.py` |
+| 대상 함수 | `RBLNOptimumDecoderMixin.preprocess_for_decoder` (약 361–406줄) |
+| 삽입 위치 | `select_bucket_size` 호출 직후, `kwargs` 구성 직전 |
+| 변경 내용 | `request_nums`와 `padded_batch_size`를 `logger.debug`로 1줄 emit |
+| 예상 diff 규모 | **추가 3–5줄, 기존 줄 수정 0** |
+| 대안 지점 | `optimum/decoder_only.py:58–65` `RBLNOptimumForCausalLM.forward` — `request_nums`와 `padded_batch_size`가 모두 지역 변수로 존재. 이쪽도 동일 규모 |
+
+**observation-only인 근거**
+
+- 제어 흐름을 바꾸지 않는다. `padded_batch_size` 계산은 그대로 두고 읽기만 한다.
+- scheduler, batch selection, KV allocation semantics를 건드리지 않는다. `select_bucket_size`(`utils/optimum/bucket.py:20`)와 `pad_decoder_items`는 수정 대상이 아니다.
+- `select_bucket_size`에 `@cache`가 걸려 있으므로 **함수 자체를 wrapping하면 첫 호출만 잡힌다.** 따라서 caller 쪽에서 읽는 방식이 유일하게 올바르며, 이는 동시에 cache 동작을 건드리지 않는다는 뜻이다.
+- log level `DEBUG`이므로 기본 실행에서는 출력되지 않는다.
+
+**`patches/` 정책 준수 방식** ([patches/README.md](../../patches/README.md) 7개 항목)
+
+1. 대상 package와 exact version: `vllm-rbln 0.11.1`
+2. upstream file path와 적용 전 SHA256을 patch 파일에 기록
+3. semantics 무변경 근거: 위 "observation-only인 근거"
+4. observation-only 우선 검토 결과: 위 4개 수단 검색 기록([TASK10](TASK10.md))
+5. 적용/복구 명령을 patch 파일에 함께 기록
+6. version/hash drift 시 fail-loud 중단: 적용 script가 SHA256 불일치 시 비-0 exit
+7. run metadata에 patch 적용 여부와 hash를 기록
+
+**대안**
+
+| 대안 | 평가 |
+|---|---|
+| bucket을 직접 관측하지 않고 `running` 수로 추론 | `vllm:num_requests_running`은 scheduler 관점의 요청 수이고 bucket은 model runner가 그 뒤에 고르는 값이다. 두 값이 항상 같다는 근거가 없으므로 대리 지표로 쓰면 관측과 추론이 섞인다 |
+| `VLLM_RBLN_USE_VLLM_MODEL=True` 경로로 전환 | 이 경로에는 `find_decode_batch_bucket`이 있으나 역시 per-step log는 없고, Stage 0–1b가 전부 기본 경로에서 검증됐으므로 substrate를 바꾸는 큰 변경이다 |
+| upstream에 관측 추가를 요청 | 시간 척도가 이 연구와 맞지 않는다 |
+| Track A를 보류하고 Stage 2(APC)를 먼저 진행 | 가능하다. Stage 2는 bucket 관측을 요구하지 않는다. 결정 3을 미루면서 연구를 진행하는 경로다 |
+
+**권고**
+
+Track A를 진행할 의사가 있다면 승인을 권고한다. 변경 규모가 log 1줄이고, 계산 자체는 이미 실행 경로에 존재하며, hash guard로 drift를 fail-loud로 잡을 수 있다. Track A를 당장 진행하지 않겠다면 **판정을 미루고 Stage 2를 먼저 진행하는 선택**도 합리적이다 — 결정 3은 Stage 2의 gate가 아니다.
+
+권고는 제안일 뿐이며 판정은 사용자가 한다. 승인 전에는 patch를 작성하지도 적용하지도 않는다.
 
 ### 결정 2 — Stage 0 대상 model의 download/compile 승인
 
@@ -96,6 +161,7 @@ Stage 1 이후 설계에 제약이 되는 관측 (근거 [TASK06](TASK06.md), [T
 - TASK05에서 Stage 0 후보 model metadata와 `atom-max8` hardware inventory를 read-only로 조사해 결정 2의 근거 표를 완성했다.
 - TASK08에서 optimum-rbln compile 파라미터 공간과 KV accounting을 source로 확정하고 Stage 1b 권고안을 만들었다.
 - TASK09에서 Stage 1a serving bring-up을 `PASS` 판정하고 `/metrics` 신호를 감사했다. TASK06의 `num_gpu_blocks` `UNKNOWN`이 해소됐다.
+- TASK10에서 multi-bucket artifact로 동시 8 sequence 실행을 확인하고 Stage 1b를 `PASS` 판정했다. decoder bucket 관측이 불가임을 실행 수준에서 확인해 결정 3을 신설했다.
 - TASK06에서 [STAGE0_PREREG.md](STAGE0_PREREG.md)로 판정 기준을 선등록한 뒤 Stage 0를 실행해 `PASS` 판정했다. `Qwen/Qwen3-4B` revision `1cfa9a72…`를 download(7.507 GiB / 66.8 s)하고 `--batch_size 1 --max_seq_len 8192 --num_devices 4`로 compile(165 s / 9.083 GiB)한 뒤 단일 inference(input 12 token, output 64 token, e2e 0.702 s)를 수행했다.
 - TASK07에서 모든 작업 종료 시 GitHub push 여부를 사용자에게 확인하는 workflow를 도입했다.
 
@@ -103,13 +169,15 @@ Stage 1 이후 설계에 제약이 되는 관측 (근거 [TASK06](TASK06.md), [T
 
 - Stage 0 single inference: [TASK06](TASK06.md)에서 `PASS`. 더 이상 진행 중이거나 blocked인 항목이 아니다.
 - Stage 1a serving bring-up: [TASK09](TASK09.md)에서 `PASS`. 더 이상 진행 중이거나 blocked인 항목이 아니다.
-- Stage 1b multi-bucket compile과 동시성 진입: 미착수. [TASK08](TASK08.md)의 권고안(`batch_size=8`, `decoder_batch_sizes=1,2,4,8`)과 사전 예측표를 사용한다.
+- Stage 1b multi-bucket compile과 동시성 진입: [TASK10](TASK10.md)에서 `PASS`.
+- Track A (decoder bucket characterization): **결정 3 대기**. per-step bucket 관측 경로가 없어 patch 승인 없이는 진행할 수 없다.
+- Stage 2 준비: prefix cache hit의 block 경계 단위가 `UNKNOWN`이라 repeated-prefix 설계를 확정할 수 없다.
 - Stage 2 APC OFF/ON characterization: Stage 1 미실행으로 미착수.
 - Decoder batch observation: source-level observation point는 확인했으나 per-step runtime metric은 `UNKNOWN`이며 runtime 검증 전이다.
 
 ## 핵심 연구 흐름
 
-Clean-room migration 및 환경 감사 → TASK01 연구 기록 체계 → TASK02 Stage 0 사전 검증(`BLOCKED`) → TASK03 작업 종료 commit workflow → TASK04 workflow 문서 개정 → TASK05 후보 model 조사·환경 재-inventory → TASK06 Stage 0 single inference(`PASS`) → TASK07 작업 종료 push 확인 workflow → TASK08 compile 파라미터·KV accounting source 조사 → TASK09 Stage 1a serving bring-up(`PASS`) → Stage 1b multi-bucket compile·동시성 → Stage 2 APC OFF/ON characterization → decoder batch observation-only characterization → raw-signal feasibility
+Clean-room migration 및 환경 감사 → TASK01 연구 기록 체계 → TASK02 Stage 0 사전 검증(`BLOCKED`) → TASK03 작업 종료 commit workflow → TASK04 workflow 문서 개정 → TASK05 후보 model 조사·환경 재-inventory → TASK06 Stage 0 single inference(`PASS`) → TASK07 작업 종료 push 확인 workflow → TASK08 compile 파라미터·KV accounting source 조사 → TASK09 Stage 1a serving bring-up(`PASS`) → TASK10 Stage 1b multi-bucket compile·동시성(`PASS`) → Stage 2 APC OFF/ON characterization → decoder batch observation-only characterization → raw-signal feasibility
 
 Stage 0–2 observation baseline 전에는 scheduler policy, KEEP/OFFLOAD/RECOMPUTE 또는 host/peer KV parking을 구현하지 않는다.
 
@@ -132,8 +200,8 @@ Legacy GPU 연구 문서는 `docs/legacy/TASK25.md`, `TASK27.md`, `TASK29.md`, `
 
 ## 다음 작업 후보
 
-1. Stage 1b — [TASK08](TASK08.md) 권고안으로 재compile하고 동시성 진입, decoder bucket 관측 가능성 판정. 선등록 후 진행한다.
-2. prefix cache hit 단위(inner block 128 token인지 outer block 8,192 token인지) 확인. Stage 2 repeated-prefix 설계에 직결된다.
+1. 사용자가 [사용자 결정 대기](#사용자-결정-대기)의 결정 3을 판정한다.
+2. prefix cache hit 단위(inner block 128 token인지 outer block 8,192 token인지) 확인. Stage 2 repeated-prefix 설계에 직결되며 재compile이 필요 없다. 선등록 후 진행한다.
 3. Stage 1 통과 후 APC OFF/ON을 독립 구성한 Stage 2 repeated-prefix baseline.
 4. baseline 통과 후 decoder bucket의 observation-only characterization.
 
