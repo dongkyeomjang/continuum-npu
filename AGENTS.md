@@ -64,6 +64,8 @@ TASK 생성 기준, 번호, 상태, 필수 구조, 동시 작업 규칙의 상�
 - instantaneous pressure만으로 cache survival을 설명하지 않는다.
 - metric의 population, unit, source, device scope를 기록한다.
 - 모든 run에 Git/package/model/device/resolved config provenance를 남긴다.
+- 측정과 판정이 포함된 TASK는 판정 기준, 예측, 실험 격자를 측정 시작 전에 commit한다(선등록, preregistration). TASK 재현 정보에 선등록 commit hash와 측정 시작 시각의 선후 관계를 기록한다. 측정 후에 판정 기준을 완화하지 않으며, 완화가 불가피하면 원 기준의 실패를 함께 보고한다.
+- 두 조건의 동치(equivalence) 판정은 고정 밴드가 아니라 중앙 ratio의 bootstrap CI가 1을 포함하고 CI 폭이 사전 등록한 상한 이내인지로 한다.
 
 관찰 사실, 파생 해석, 연구 hypothesis를 분리한다. 관측 불가 값을 0으로 채우거나 근거 없는 결론으로 보완하지 않는다. raw result는 `results/npu/` 등 artifact 경로에 보존하고 TASK에는 핵심 measurement, 해석, 경로, 재현 방법을 기록한다.
 

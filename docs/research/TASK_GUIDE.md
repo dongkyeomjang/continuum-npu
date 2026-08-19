@@ -62,6 +62,12 @@ Git commit, package version, model, relevant config, device configuration 등 �
 
 관찰 사실과 raw measurement
 
+측정 TASK는 다음을 분리해 기록한다.
+
+- `requested_condition` — 요청한 실험 조건
+- `observed_condition` — 실제로 관측된 조건
+- `condition_reached` — 요청 조건 도달 여부 (`YES` / `NO` / `PARTIAL` / `UNKNOWN`)
+
 ## 핵심 발견
 
 ## 해석
@@ -81,6 +87,8 @@ UNKNOWN 또는 추가 검증 필요 사항
 ## 재현 정보
 
 command, config, artifact/result path, commit, version 등
+
+- 선등록 commit: 선등록 commit hash와 측정 시작 시각의 선후 관계. 측정이 없는 TASK는 `해당 없음`
 ```
 
 섹션을 억지로 길게 쓰지는 않지만 중요한 섹션을 이유 없이 생략하지 않는다. 해당 사항이 없으면 `없음`이라고 명시할 수 있다.
@@ -90,6 +98,8 @@ command, config, artifact/result path, commit, version 등
 - 관찰값, 파생 해석, 연구적 추론을 구분한다.
 - 근거가 부족하면 `UNKNOWN`, `확인되지 않음`, `추가 검증 필요`로 남긴다.
 - requested condition, observed condition, condition reached를 별도 기록한다.
+- 측정과 판정이 포함된 TASK는 판정 기준, 예측, 실험 격자를 측정 시작 전에 commit한다(선등록, preregistration). `## 재현 정보`에 선등록 commit hash와 측정 시작 시각의 선후 관계를 기록한다. 측정 후에 판정 기준을 완화하지 않으며, 완화가 불가피하면 원 기준의 실패를 함께 보고한다.
+- 두 조건의 동치(equivalence) 판정은 고정 밴드가 아니라 중앙 ratio의 bootstrap CI가 1을 포함하고 CI 폭이 사전 등록한 상한 이내인지로 한다.
 - metric의 population, unit, source, device scope를 기록한다.
 - raw log 수천 줄은 TASK에 복사하지 않는다. `results/npu/...` 등의 artifact path, 핵심 measurement, 해석, 재현 방법을 기록하고 필요한 짧은 error/log만 인용한다.
 

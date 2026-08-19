@@ -46,5 +46,7 @@ TASK 생성 기준, 번호, 상태, 문서 구조는 [`docs/research/TASK_GUIDE.
 13. Stage 0–2 baseline 전에는 KEEP/OFFLOAD/RECOMPUTE, host/peer parking, scheduler policy를 구현하지 않는다.
 14. raw evidence를 보존하고 invariant 실패 시 run을 `INVALID`로 종료한다. 관측 불가 field를 0으로 채우지 않는다.
 15. 과거에 실패한 접근, 잘못된 가정, unreachable condition, semantic confounder, invalid metric으로 판정된 내용을 관련 TASK 확인 없이 반복하지 않는다.
+16. 측정과 판정이 포함된 TASK는 판정 기준, 예측, 실험 격자를 측정 시작 전에 commit한다(선등록, preregistration). TASK 재현 정보에 선등록 commit hash와 측정 시작 시각의 선후 관계를 기록한다. 측정 후에 판정 기준을 완화하지 않으며, 완화가 불가피하면 원 기준의 실패를 함께 보고한다.
+17. 두 조건의 동치(equivalence) 판정은 고정 밴드가 아니라 중앙 ratio의 bootstrap CI가 1을 포함하고 CI 폭이 사전 등록한 상한 이내인지로 한다.
 
 `docs/legacy/TASKxx.md`는 legacy GPU namespace다. 새 NPU TASK 번호는 `docs/research/TASK*.md`만 기준으로 정한다.
