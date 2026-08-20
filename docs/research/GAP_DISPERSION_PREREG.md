@@ -127,7 +127,14 @@ FIFO pointer 메커니즘이 맞다면 **재사용 실패가 도착 순서 후�
 `<RUN>` = `results/npu/stage2/<timestamp>-gap-dispersion`
 
 1. `apply.sh status` → `patched` 확인
-2. block 0–2, 위 순서표대로 `run_sweep.sh <RUN> <SYNC|DISPERSED> 8 <B> <sync|none>` 실행
+2. block 0–2, 위 순서표대로 실행:
+
+   ```bash
+   SWEEP_BASE_SEED=20260831 SWEEP_BLOCK_PREFIX=g \
+     bash experiments/npu/stage2/run_sweep.sh <RUN> <SYNC|DISPERSED> 8 <B> <sync|none>
+   ```
+
+   `run_sweep.sh`는 plan seed와 block id를 환경변수로 받도록 이번에 확장했다 (기본값은 [NSLOTS_SWEEP_PREREG.md](NSLOTS_SWEEP_PREREG.md)의 값). 한 runner가 두 선등록 실험을 편집 없이 수행하기 위해서다.
    - SYNC는 `sync`, DISPERSED는 `none`
 3. 조합마다 `utilization.py --cost-model` 실행
 4. P1·P2 확인 후 판정

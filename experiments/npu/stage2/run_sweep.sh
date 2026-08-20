@@ -12,8 +12,12 @@ RUN="$1"; ARM="$2"; N="$3"; BLOCK="$4"; MODE="$5"
 REPO=/home/rebel/continuum-npu
 cd "$REPO"
 
+# The plan seed and block id are per-experiment, not per-script: override them
+# so one runner can serve different preregistered experiments without editing.
+BASE_SEED="${SWEEP_BASE_SEED:-20260830}"
+BLOCK_PREFIX="${SWEEP_BLOCK_PREFIX:-n${N}b}"
 TAG="${ARM}.n${N}.b${BLOCK}"
-BLOCK_ID="n${N}b${BLOCK}"
+BLOCK_ID="${BLOCK_PREFIX}${BLOCK}"
 DONE_MARK="$RUN/done.${TAG}"
 
 if [ -f "$DONE_MARK" ]; then
@@ -51,7 +55,7 @@ env -u PYTHONPATH "$REPO/experiments/npu/launch/run_isolated_python.sh" \
   --arm "$ARM" --sessions "$N" --turns 2 \
   --first-segment uniform:800:1600 --later-segment fixed:8 \
   --generation uniform:32:256 --gap uniform:1:5 $EXTRA \
-  --base-seed 20260830 --block-id "$BLOCK_ID" --sampling-seed 20260819 \
+  --base-seed "$BASE_SEED" --block-id "$BLOCK_ID" --sampling-seed 20260819 \
   --output-dir "$REPO/$RUN/probe" > "$RUN/probe-${TAG}.log" 2>&1
 PE=$?
 
