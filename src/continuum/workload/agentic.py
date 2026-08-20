@@ -183,6 +183,42 @@ def zero_gaps(sessions: list[Session]) -> list[Session]:
     ]
 
 
+def set_uniform_gaps(sessions: list[Session]) -> list[Session]:
+    """Return the same plans with every tool gap replaced by their mean.
+
+    Total gap time is preserved exactly, so an arm built this way differs from
+    the original only in the *dispersion* of resume arrivals -- which is the
+    variable when asking whether reuse is governed by gap length or by when
+    sessions come back.
+    """
+    gaps = [t.gap_after_s for s in sessions for t in s.turns if t.index < len(s.turns) - 1]
+    if not gaps:
+        return list(sessions)
+    mean = sum(gaps) / len(gaps)
+    out = [
+        Session(
+            session_id=s.session_id,
+            turns=tuple(
+                Turn(
+                    index=t.index,
+                    new_segment_tokens=t.new_segment_tokens,
+                    generation_tokens=t.generation_tokens,
+                    gap_after_s=(mean if t.index < len(s.turns) - 1 else 0.0),
+                    text_seed=t.text_seed,
+                )
+                for t in s.turns
+            ),
+        )
+        for s in sessions
+    ]
+    new_total = sum(t.gap_after_s for s in out for t in s.turns)
+    if abs(new_total - sum(gaps)) > 1e-6:
+        raise AssertionError(
+            f"total gap changed: {sum(gaps)} -> {new_total}"
+        )
+    return out
+
+
 def plan_summary(sessions: list[Session]) -> dict:
     """Aggregate view used to record the requested condition of a run."""
     return {

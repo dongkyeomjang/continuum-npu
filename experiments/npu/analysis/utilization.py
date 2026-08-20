@@ -44,6 +44,9 @@ def main() -> int:
     p.add_argument("--metrics-dump", type=Path)
     p.add_argument("--buckets", default="1,2,4,8")
     p.add_argument("--label", required=True)
+    p.add_argument("--cost-model", action="store_true",
+                   help="add TASK13 cost-model predictions for the [BUCKET] step "
+                        "sequence, so the model can be checked against measurement")
     p.add_argument("--output", required=True, type=Path)
     args = p.parse_args()
 
@@ -82,6 +85,7 @@ def main() -> int:
         )
 
     itl_mean = None
+    itl_sum_measured = None
     if args.metrics_dump and args.metrics_dump.exists():
         s = c = 0.0
         for line in args.metrics_dump.read_text().splitlines():
@@ -93,6 +97,21 @@ def main() -> int:
             if m:
                 c += float(m.group(1))
         itl_mean = (s / c) if c else None
+        itl_sum_measured = s
+
+    # Cost-model transfer check. predicted_itl_sum is the same quantity the
+    # server reports as inter_token_latency_seconds_sum: during one decode step
+    # every running request advances one token, and each of those tokens has an
+    # inter-token latency of about that step's duration.
+    predicted = None
+    if args.cost_model:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src"))
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "substrate"))
+        from rbln_ca25_vllm_rbln_0111 import RBLN_CA25_VLLM_RBLN_0111 as D  # noqa: E402
+        busy = sum(D.step_time_s(a) for a, _ in pairs)
+        itl_sum = sum(a * D.step_time_s(a) for a, _ in pairs)
+        predicted = {"busy_s": busy, "itl_sum_s": itl_sum,
+                     "descriptor": D.name}
 
     gen_tokens = sum((r.get("completion_tokens") or 0) for r in rows)
     wall = meta["wall_clock_s"]
@@ -119,6 +138,14 @@ def main() -> int:
         "turn2_reuse_rate": (len(reuse_hits) / len(turn2)) if turn2 else None,
         "turn2_cached_tokens_total": sum((r.get("cached_tokens") or 0) for r in turn2),
         "mean_itl_s": itl_mean,
+        "measured_itl_sum_s": itl_sum_measured,
+        "predicted": predicted,
+        "resume_arrivals_s": sorted(r["sent_s"] for r in turn2),
+        "resume_reuse_by_arrival": [
+            {"sent_s": r["sent_s"], "session_index": r["session_index"],
+             "cached_tokens": r.get("cached_tokens") or 0}
+            for r in sorted(turn2, key=lambda x: x["sent_s"])
+        ],
         "pair_histogram": dict(sorted(hist.items(),
                                       key=lambda kv: int(kv[0].split("->")[0]))),
         "invariant_violations": violations,
@@ -136,6 +163,10 @@ def main() -> int:
     print(f"  throughput (tok/s)  : {result['throughput_tok_per_s']}")
     print(f"  turn2 reuse         : {len(reuse_hits)}/{len(turn2)}")
     print(f"  mean ITL (s)        : {itl_mean}")
+    if predicted:
+        print(f"  predicted busy (s)  : {predicted['busy_s']:.3f}")
+        print(f"  predicted ITLsum (s): {predicted['itl_sum_s']:.3f}   "
+              f"measured {itl_sum_measured}")
     print(f"  VALID               : {result['valid']}")
     for v in violations:
         print(f"    ! {v}")

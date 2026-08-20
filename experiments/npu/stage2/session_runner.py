@@ -33,6 +33,7 @@ from continuum.workload.agentic import (  # noqa: E402
     Distribution,
     generate_sessions,
     plan_summary,
+    set_uniform_gaps,
     zero_gaps,
 )
 
@@ -108,6 +109,9 @@ def main() -> int:
     p.add_argument("--later-segment", required=True)
     p.add_argument("--generation", required=True)
     p.add_argument("--gap", required=True)
+    p.add_argument("--sync-gaps", action="store_true",
+                   help="replace every gap by their mean, preserving the total, "
+                        "so only the dispersion of resume arrivals changes")
     p.add_argument("--zero-gaps", action="store_true",
                    help="derive this arm from the same plan with gaps removed, "
                         "so the paired arms differ in the gap and nothing else")
@@ -149,8 +153,12 @@ def main() -> int:
         base_seed=args.base_seed,
         block_id=args.block_id,
     )
+    if args.zero_gaps and args.sync_gaps:
+        raise SystemExit("--zero-gaps and --sync-gaps are mutually exclusive")
     if args.zero_gaps:
         sessions = zero_gaps(sessions)
+    if args.sync_gaps:
+        sessions = set_uniform_gaps(sessions)
     if first_ladder or gen_ladder:
         from dataclasses import replace
         rebuilt = []
@@ -233,6 +241,8 @@ def main() -> int:
         "turns": args.turns,
         "plan": plan_summary(sessions),
         "zero_gaps": args.zero_gaps,
+        "sync_gaps": args.sync_gaps,
+        "total_gap_s": sum(t.gap_after_s for s in sessions for t in s.turns),
         "rows_file": rows_path.name,
         "started_at_utc": datetime.now(timezone.utc).isoformat(),
     }
