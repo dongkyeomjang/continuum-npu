@@ -62,12 +62,17 @@ PE=$?
 
 curl -s http://127.0.0.1:8000/metrics > "$RUN/metrics-${TAG}.prom"
 
-PID=$(ps -eo pid,cmd | grep "python3 /usr/local/bin/vllm serve" | grep -v grep | awk '{print $1}' | head -1)
-[ -n "$PID" ] && kill -TERM "$PID"
-for i in $(seq 1 60); do ps -eo cmd | grep -q "[v]llm serve /home/rebel" || break; sleep 1; done
-if ps -eo cmd | grep -q "[v]llm serve /home/rebel"; then
-  echo "$TAG: server still alive after SIGTERM"; exit 1
+# Shut down *this* run's server by the pid we started, not by pattern: if a
+# previous combination ever leaks a server, a pattern match would kill the
+# wrong one and every later combination would fail in a cascade.
+kill -TERM "$SRV" 2>/dev/null
+for i in $(seq 1 60); do kill -0 "$SRV" 2>/dev/null || break; sleep 1; done
+if kill -0 "$SRV" 2>/dev/null; then
+  kill -KILL "$SRV" 2>/dev/null
+  sleep 5
+  echo "$TAG: server needed SIGKILL"
 fi
+wait "$SRV" 2>/dev/null
 
 # session_runner writes requests.<arm>.<block_id>.jsonl; give it the combination
 # name so combinations never collide in the probe directory.
