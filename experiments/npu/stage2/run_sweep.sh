@@ -15,6 +15,7 @@ cd "$REPO"
 # The plan seed and block id are per-experiment, not per-script: override them
 # so one runner can serve different preregistered experiments without editing.
 BASE_SEED="${SWEEP_BASE_SEED:-20260830}"
+ARTIFACT="${SWEEP_ARTIFACT:-$REPO/models/Qwen3-4B-rbln-b8-s8192-d4-mb}"
 BLOCK_PREFIX="${SWEEP_BLOCK_PREFIX:-n${N}b}"
 TAG="${ARM}.n${N}.b${BLOCK}"
 BLOCK_ID="${BLOCK_PREFIX}${BLOCK}"
@@ -33,7 +34,7 @@ case "$MODE" in
 esac
 
 env -u PYTHONPATH VLLM_LOGGING_LEVEL=DEBUG VLLM_RBLN_METRICS=1 \
-  vllm serve "$REPO/models/Qwen3-4B-rbln-b8-s8192-d4-mb" \
+  vllm serve "$ARTIFACT" \
   --host 127.0.0.1 --port 8000 \
   --enable-prefix-caching --enable-prompt-tokens-details \
   > "$RUN/server-${TAG}.log" 2>&1 &
@@ -51,7 +52,7 @@ done
 env -u PYTHONPATH "$REPO/experiments/npu/launch/run_isolated_python.sh" \
   experiments/npu/stage2/session_runner.py \
   --base-url http://127.0.0.1:8000 \
-  --tokenizer-dir "$REPO/models/Qwen3-4B-rbln-b8-s8192-d4-mb" \
+  --tokenizer-dir "$ARTIFACT" \
   --arm "$ARM" --sessions "$N" --turns 2 \
   --first-segment uniform:800:1600 --later-segment fixed:8 \
   --generation uniform:32:256 --gap uniform:1:5 $EXTRA \

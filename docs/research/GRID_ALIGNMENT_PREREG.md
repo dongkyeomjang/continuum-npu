@@ -150,7 +150,13 @@ P1(짝 plan 동일성), I1–I5는 [NSLOTS_SWEEP_PREREG.md](NSLOTS_SWEEP_PREREG.
 4. 조합마다 `utilization.py --cost-model` (2b는 `--buckets 1,2,4,6,8`)
 5. P1 확인 후 판정표 작성
 
-`run_sweep.sh`는 artifact 경로를 하드코딩하므로 2b 전에 환경변수로 분리한다. **그 수정은 2b 측정 시작 전에 commit한다.**
+`run_sweep.sh`가 artifact 경로를 하드코딩하고 있어 `SWEEP_ARTIFACT` 환경변수로 분리했다 (기본값은 기존 b8 artifact이므로 2a와 이전 sweep의 재현성은 바뀌지 않는다). **이 수정은 2b 측정 시작 전에 commit했다.**
+
+```bash
+SWEEP_BASE_SEED=20260842 \
+SWEEP_ARTIFACT=/home/rebel/continuum-npu/models/Qwen3-4B-rbln-b8-s8192-d4-mb6 \
+  bash experiments/npu/stage2/run_sweep.sh <RUN2b> <ARM> <6|8> <B> <none|zero>
+```
 
 ## 관련 문서
 
