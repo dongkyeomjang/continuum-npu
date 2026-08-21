@@ -3,6 +3,7 @@
 from .descriptor import (
     HitFormula,
     Layer,
+    PrefillCostModel,
     Provenance,
     StepCostModel,
     SubstrateDescriptor,
@@ -11,6 +12,7 @@ from .descriptor import (
 __all__ = [
     "HitFormula",
     "Layer",
+    "PrefillCostModel",
     "Provenance",
     "StepCostModel",
     "SubstrateDescriptor",

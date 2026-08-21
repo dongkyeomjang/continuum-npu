@@ -6,7 +6,7 @@
 
 현재 연구 단계: Stage 0, Stage 1a, Stage 1b가 모두 `PASS`했고, [TASK11](TASK11.md)에서 prefix cache hit 단위를 **inner block 128 token**으로 확정했다. [TASK12](TASK12.md)에서 결정 3을 집행해 per-step decoder bucket 관측 patch를 적용·검증했고, [TASK13](TASK13.md)에서 decode step 비용을 `f(bucket) + g(actual)`로 분해했다. [TASK14](TASK14.md)에서 prefix-cache 생존 문턱을 실측하고 [TASK15](TASK15.md)에서 12/12 trial로 재현해 실제 재계산까지 확정했다. [TASK16](TASK16.md)에서 substrate descriptor와 층 태깅 규칙으로 "질문은 클래스, 상수는 인스턴스"를 코드·기록 체계에 구조화했고, [TASK17](TASK17.md)에서 agentic workload generator로 bucket 전이를 처음 관측했다. [TASK18](TASK18.md)에서 per-request 귀속 게이트를 통과하고 [TASK19](TASK19.md)에서 첫 짝 비교를, [TASK20](TASK20.md)에서 44 조합 N/slots sweep을 수행했다. **agentic gap의 utilization 효과는 부호가 바뀐다** — N이 compiled bucket 사이에 끼면(N=6) 오히려 15 % 높고, N=10–12에서 9 % 낮다. [TASK21](TASK21.md)에서 총 gap 시간을 고정하고 분산만 바꿔 재사용률이 움직임을 관측했다(DISPERSED 11/24 vs SYNC 7/24, 반대 방향 0블록이나 동률 1블록으로 `INCONCLUSIVE`).
 
-가장 최근 TASK: [TASK21](TASK21.md) — gap 분산 → 재사용 메커니즘 검증 (`DONE`, 판정 `INCONCLUSIVE`)
+가장 최근 TASK: [TASK22](TASK22.md) — prefill 배타 실행의 직접 검증과 비용 모델 v2 (`DONE`)
 
 "가장 최근 TASK"는 번호가 가장 큰 TASK다. 그 TASK의 상태가 `BLOCKED`, `PARTIAL`, `FAILED`, `INVALID` 중 하나여서 최근 진척을 대표하지 못할 때만 아래에 "최근 완료 TASK"(가장 번호가 큰 `DONE` TASK)를 별도로 한 줄 추가한다. 두 줄이 같은 TASK를 가리키면 한 줄만 남긴다.
 
@@ -19,7 +19,7 @@ Stage 1 이후 설계에 제약이 되는 관측 (근거 [TASK06](TASK06.md), [T
 - `attn_impl=eager` 기본값에서 KV pool 크기는 DRAM이 아니라 `batch_size`가 결정한다. `kvcache_num_blocks = (max_seq_len // kvcache_block_size) × batch_size`이고 기본값에서 `kvcache_block_size = max_seq_len`이므로 결과는 정확히 `batch_size`이며 block 1개가 sequence 1개분이다. 현재 b1 artifact의 KV pool은 sequence 1개분(8,320 token)뿐이므로 동시성 실험은 재compile을 전제로 한다.
 - decoder bucket은 자동으로 다단화되지 않는다. `decoder_batch_sizes`를 명시하지 않으면 단일 bucket이고 bucket 선택 자체가 일어나지 않는다.
 - per-step `(요청 수, 선택된 bucket)`은 upstream에서 계산만 되고 노출되지 않았으나, [TASK12](TASK12.md)의 observation-only patch가 `[BUCKET] request_nums=<n> padded_batch_size=<b>` DEBUG 로그로 노출시켰다. 사상표는 [TASK13](TASK13.md)에서 완성됐다: 1→1, 2→2, 3→4, 4→4, 5→8, 6→8, 7→8, 8→8.
-- **비용 모형은 다중 세션으로 전이되지 않는다** ([TASK20](TASK20.md)): 정상 상태에서 잰 상수를 전이 workload에 쓰면 `predicted/measured` ITL sum이 N에 따라 0.86 → 0.57로 떨어져 **최대 43 % 과소평가**한다. 유력한 기전은 prefill 배타 실행(`optimum_scheduler.py:300-304`)이 다른 세션의 ITL에 실리는 것이다(hypothesis).
+- **비용 모형 v2 = decode 항 + prefill 직렬화 항** ([TASK22](TASK22.md)). prefill은 실행 중인 **모든** 세션의 decode를 그 길이만큼 정지시킨다. `prefill_s(n) = ceil(n/128) × (0.021206 + 6.399e-7 × n)`이고, 시스템 비용은 `prefill_s × 동시 decoder 수`다. [TASK20](TASK20.md)의 v1 편향(0.57–0.86, N 의존)이 이 항으로 87–120 % 설명되어 v2에서 0.97–1.04로 모인다. **cache 실패의 비용은 재계산 시간 × 동시 decoder 수**다.
 - **decode step 비용 모형** ([TASK13](TASK13.md), 정상 상태 한정): `step_time ≈ f(bucket) + g(actual)`. `f`는 계단 함수로 model p50이 bucket 1/2/4/8에서 9.51 / 10.05 / 10.355 / 12.4025 ms이고 같은 bucket 내 범위는 0.01–0.03 ms다. `g`는 model·sampler 밖 engine overhead로 요청당 약 0.041 ms다. bucket 효과가 지배 항이므로 slot 낭비율은 시간 의미를 갖되 "bucket 한 단계 비용"으로 읽는다. `VLLM_RBLN_DECODE_BATCH_BUCKET_*`와 `VLLM_RBLN_SUB_BLOCK_CACHE`는 기본 경로에서 무효다.
 - `num_gpu_blocks`는 frontend가 EngineCore 보고값을 누적하는 구조(`vllm/v1/engine/core_client.py:712`) 때문에 EngineCore 값의 2배로 나온다([TASK09](TASK09.md)에서 해소). 실제 KV pool은 EngineCore 값이다. `"GPU KV cache size: N tokens"` log는 `num_blocks × block_size`가 아니라 `max_concurrency × max_model_len`이다.
 - 채택 가능한 관측 신호([TASK09](TASK09.md), [TASK11](TASK11.md) 감사): `vllm:num_requests_running`, `vllm:num_requests_waiting`, `vllm:kv_cache_usage_perc`(해상도는 inner block, 분모 `num_gpu_blocks−1`), `vllm:prefix_cache_queries_total`·`hits_total`·`prompt_tokens_cached_total`(전부 단위가 요청이 아니라 **token**. **`hits`는 층 1, `cached`는 층 2를 세며 두 값은 층 2가 evict된 뒤 갈라진다** — [TASK15](TASK15.md)), server 주기 로그의 `Running/Waiting/KV usage`, DEBUG 로그의 `[PFX] [CACHE-HIT]`(outer/inner block ID)와 `Allocated/Freed block(s)`. `/metrics` gauge는 반드시 in-flight로 표집하고 metric 이름은 정확히 일치시킨다.
@@ -36,7 +36,7 @@ Stage 1 이후 설계에 제약이 되는 관측 (근거 [TASK06](TASK06.md), [T
 
 환경 provenance `UNKNOWN` (`PARTIAL` 해소): 환경 문서 [NPU_ENVIRONMENT.md](../environment/NPU_ENVIRONMENT.md)의 hostname은 `rebel-pcie-0123`이지만 현재 관찰 hostname은 `atom-max8`이다. 두 이름이 같은 host인지, 재설치·rename·다른 장비인지는 여전히 `UNKNOWN`이다. [TASK05](TASK05.md)의 read-only 재-inventory에서 hostname을 제외한 모든 대조 항목(visible ID 수 32, card grouping 4×8, device memory 15.7 GiB, NUMA 분할, topology distance 4/8/12, RSD group 0)이 일치했으므로 해당 문서의 hardware 기술은 현재 host에서 실무상 사용할 수 있다. 다만 값 일치는 장비 동일성의 증거가 아니므로 provenance `UNKNOWN`은 유지한다.
 
-다음 권장 작업: (1) 비용 모델에 **prefill 배타 항** 추가 — `optimum_scheduler.py:300-304`가 prefill을 배타 실행한다고 명시하며, 이것이 [TASK20](TASK20.md) 발견 5의 유력한 기전이다. 관측 채널 설계가 선행 과제다. (2) [TASK13](TASK13.md)의 후속 — 블록 반복과 bucket **전이** 상황 측정. (3) Stage 2 repeated-prefix baseline — 설계 제약은 [TASK11](TASK11.md)·[TASK14](TASK14.md). 전부 측정이 포함되므로 선등록 후 진행한다. 사용자 지시 없이 자동 착수하지 않는다.
+다음 권장 작업: (1) bucket 격자 정렬 법칙의 관측 완성과 개입 검증 (진행 중). (2) [TASK13](TASK13.md)의 후속 — 블록 반복과 bucket **전이** 상황 측정. (3) Stage 2 repeated-prefix baseline — 설계 제약은 [TASK11](TASK11.md)·[TASK14](TASK14.md). 전부 측정이 포함되므로 선등록 후 진행한다. 사용자 지시 없이 자동 착수하지 않는다.
 
 ## Task Index
 
@@ -62,6 +62,7 @@ Stage 1 이후 설계에 제약이 되는 관측 (근거 [TASK06](TASK06.md), [T
 | [TASK19](TASK19.md) | DONE | AGENTIC vs CONVENTIONAL 짝 비교 파일럿 | 1차 측정은 불변식 P1 위반으로 `INVALID` 처리하고(원인: CPython `randrange(0,1)`의 가변 비트 소비) 짝 설계를 구성 기반으로 고쳐 재등록·재측정했다. **방향이 부하에 의존한다**: N=8에서 utilization ratio 0.872(AGENTIC 12.8 % 낮음), N=16에서 1.009(저하 없음). 대기 큐가 gap을 흡수한다. 재사용률은 AGENTIC이 오히려 높았다(3/8 vs 1/8). 사전 예측 5개 중 2개만 적중. |
 | [TASK20](TASK20.md) | DONE | N/slots sweep 본 측정 | 44 조합 전부 `VALID`(`INVALID` 0). **저하 확정은 N=10·12뿐**(pooled 0.910·0.919). N=6은 3블록 전부 **반대 방향**(pooled 1.150) — gap이 batch를 padding 0인 크기로 쪼개 utilization을 올린다. N=8은 5블록 중 4블록만 저하 방향이라 선등록 기준 미달. 재사용률은 N 증가에 단조 감소해 N≥12에서 0. **TASK13 비용 모델이 다중 세션으로 전이되지 않는다**(예측/실측 0.86→0.57). |
 | [TASK21](TASK21.md) | DONE | gap 분산 → 재사용 메커니즘 검증 | 총 gap 시간을 소수점까지 고정하고(P2) 분산만 조작했다. DISPERSED 11/24 vs SYNC 7/24이고 **반대 방향 블록은 0**이나 동률 1블록 때문에 선등록 기준상 `INCONCLUSIVE`다. 도착 순서 서명이 6개 arm-block 중 5개에서 확인됐고 **DISPERSED는 3/3 블록에서 가장 이른 두 도착이 성공**했다. eviction OB 열의 중간 8개가 전 조합에서 FIFO였다. |
+| [TASK22](TASK22.md) | DONE | prefill 배타 실행의 직접 검증과 비용 모델 v2 | prefill이 실행 중인 전 세션의 decode를 **정확히 그 길이만큼 정지**시킴을 시간 단위로 관측했다(4 bystander 스파이크가 1 ms 이내로 겹침, 스파이크/prefill 1.01–1.14). 정지 시간 모형 `ceil(n/128)×(0.0212+6.4e-7n)`이 최대 잔차 2.4 ms로 맞는다. **TASK20 비용 모델 편향이 이 항으로 87–120 % 설명된다**(v1 0.57–0.86 → v2 0.97–1.04, N 의존 소멸). 대조 구간에도 startup prefill 직렬화가 나타나 판정 1은 선등록대로 `PARTIAL`. |
 | [TASK07](TASK07.md) | DONE | 작업 종료 시 GitHub push 확인 Workflow 도입 | 모든 작업 종료 시 `origin/main` push 여부를 반드시 사용자에게 묻고, 현재 질문에 대한 명시적 승인 후에만 push하도록 규칙을 추가했다. |
 
 ## 사용자 결정 대기
@@ -197,6 +198,7 @@ Track A를 진행할 의사가 있다면 승인을 권고한다. 변경 규모�
 - TASK19에서 AGENTIC vs CONVENTIONAL 첫 짝 비교를 수행하고, agentic 저하가 부하 수준(N 대 `max_num_seqs`)에 의존함을 관측했다.
 - TASK20에서 44 조합 sweep으로 그 의존이 **부호까지 바뀜**을 확인하고, TASK13 비용 모델이 다중 세션으로 전이되지 않음을 발견했다.
 - TASK21에서 총 gap 시간을 고정한 채 분산만 조작해 재사용률이 도착 순서에 좌우된다는 서명을 관측했다(판정은 `INCONCLUSIVE`).
+- TASK22에서 prefill 배타 실행을 직접 관측하고 비용 모델 v2로 TASK20의 편향을 설명했다.
 - TASK06에서 [STAGE0_PREREG.md](STAGE0_PREREG.md)로 판정 기준을 선등록한 뒤 Stage 0를 실행해 `PASS` 판정했다. `Qwen/Qwen3-4B` revision `1cfa9a72…`를 download(7.507 GiB / 66.8 s)하고 `--batch_size 1 --max_seq_len 8192 --num_devices 4`로 compile(165 s / 9.083 GiB)한 뒤 단일 inference(input 12 token, output 64 token, e2e 0.702 s)를 수행했다.
 - TASK07에서 모든 작업 종료 시 GitHub push 여부를 사용자에게 확인하는 workflow를 도입했다.
 
@@ -212,7 +214,7 @@ Track A를 진행할 의사가 있다면 승인을 권고한다. 변경 규모�
 
 ## 핵심 연구 흐름
 
-Clean-room migration 및 환경 감사 → TASK01 연구 기록 체계 → TASK02 Stage 0 사전 검증(`BLOCKED`) → TASK03 작업 종료 commit workflow → TASK04 workflow 문서 개정 → TASK05 후보 model 조사·환경 재-inventory → TASK06 Stage 0 single inference(`PASS`) → TASK07 작업 종료 push 확인 workflow → TASK08 compile 파라미터·KV accounting source 조사 → TASK09 Stage 1a serving bring-up(`PASS`) → TASK10 Stage 1b multi-bucket compile·동시성(`PASS`) → TASK11 prefix cache hit 경계 확정 → TASK12 decoder bucket 관측 patch 적용·검증 → TASK13 decode step 비용 모형 분해 → TASK14 prefix-cache 생존 문턱 실측 → TASK15 절벽 재현·재계산 attribution 확정 → TASK16 substrate descriptor·층 태깅 → TASK17 agentic workload generator·bucket 전이 관측 → TASK18 per-request 귀속 게이트 통과 → TASK19 AGENTIC vs CONVENTIONAL 짝 비교 파일럿 → TASK20 N/slots sweep 본 측정 → TASK21 gap 분산 메커니즘 검증 → Stage 2 APC OFF/ON characterization → decoder batch observation-only characterization → raw-signal feasibility
+Clean-room migration 및 환경 감사 → TASK01 연구 기록 체계 → TASK02 Stage 0 사전 검증(`BLOCKED`) → TASK03 작업 종료 commit workflow → TASK04 workflow 문서 개정 → TASK05 후보 model 조사·환경 재-inventory → TASK06 Stage 0 single inference(`PASS`) → TASK07 작업 종료 push 확인 workflow → TASK08 compile 파라미터·KV accounting source 조사 → TASK09 Stage 1a serving bring-up(`PASS`) → TASK10 Stage 1b multi-bucket compile·동시성(`PASS`) → TASK11 prefix cache hit 경계 확정 → TASK12 decoder bucket 관측 patch 적용·검증 → TASK13 decode step 비용 모형 분해 → TASK14 prefix-cache 생존 문턱 실측 → TASK15 절벽 재현·재계산 attribution 확정 → TASK16 substrate descriptor·층 태깅 → TASK17 agentic workload generator·bucket 전이 관측 → TASK18 per-request 귀속 게이트 통과 → TASK19 AGENTIC vs CONVENTIONAL 짝 비교 파일럿 → TASK20 N/slots sweep 본 측정 → TASK21 gap 분산 메커니즘 검증 → TASK22 prefill 배타 실행 검증·비용 모델 v2 → Stage 2 APC OFF/ON characterization → decoder batch observation-only characterization → raw-signal feasibility
 
 Stage 0–2 observation baseline 전에는 scheduler policy, KEEP/OFFLOAD/RECOMPUTE 또는 host/peer KV parking을 구현하지 않는다.
 
@@ -234,6 +236,10 @@ Legacy GPU 연구 문서는 `docs/legacy/TASK25.md`, `TASK27.md`, `TASK29.md`, `
 - 짝(paired) 설계는 난수 소비량이 아니라 **구성**으로 보장한다. 두 arm을 각각 생성하지 않고 한 plan에서 파생한다 ([TASK19](TASK19.md)). 난수 소비량 동일성을 단일 seed로 확인하지 않는다 — 확률적 소비를 하는 함수가 있다.
 - 핵심 발견에는 층 태그(`silicon` / `stack` / `class` / `universal`)를 붙인다. `class`는 형태에만 붙이고 값에는 붙이지 않으며, 근거 한 줄을 동반한다 ([TASK16](TASK16.md), [TASK_GUIDE.md](TASK_GUIDE.md)).
 - 두 조건의 동치 판정은 고정 밴드가 아니라 중앙 ratio bootstrap CI가 1을 포함하는지와 사전 등록한 CI 폭 상한으로 한다.
+
+## 보류 중인 항목
+
+- **[TASK21](TASK21.md) b1(gap 분산) 블록 추가는 보류한다.** 사유: prefill 직렬화 항이 확정되기 전에는 분산 효과와 prefill 정지 효과가 얽혀 있어 표본을 늘려도 해석력이 올라가지 않는다. [TASK22](TASK22.md)에서 항이 확정됐으므로, 그 결과를 반영한 **별도 설계**로 재개한다 (Advisor 지시, 2026-08-21).
 
 ## 다음 작업 후보
 

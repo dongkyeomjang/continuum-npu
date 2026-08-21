@@ -90,6 +90,53 @@ class StepCostModel:
 
 
 @dataclass(frozen=True)
+class PrefillCostModel:
+    """Time one prefill occupies the device, as a function of tokens computed.
+
+    On a substrate that runs prefill exclusively, this is not just the
+    requesting session's own latency: every other session's decode stops for
+    the whole duration. That is why it belongs in the cost model at all.
+
+        prefill_s(n) = ceil(n / chunk_tokens) * (per_chunk_s + drift_s_per_token * n)
+
+    The drift term exists because attention within a chunk grows with how much
+    context precedes it, so later chunks of a long prompt cost more than early
+    ones.
+    """
+
+    chunk_tokens: int
+    per_chunk_s: float
+    drift_s_per_token: float = 0.0
+
+    def __post_init__(self) -> None:
+        if self.chunk_tokens <= 0:
+            raise ValueError("chunk_tokens must be positive")
+        if self.per_chunk_s <= 0:
+            raise ValueError("per_chunk_s must be positive")
+        if self.drift_s_per_token < 0:
+            raise ValueError("drift_s_per_token must be non-negative")
+
+    def prefill_s(self, computed_tokens: int) -> float:
+        if computed_tokens < 0:
+            raise ValueError("computed_tokens must be non-negative")
+        if computed_tokens == 0:
+            return 0.0
+        chunks = math.ceil(computed_tokens / self.chunk_tokens)
+        return chunks * (self.per_chunk_s + self.drift_s_per_token * computed_tokens)
+
+    def stall_s(self, *, computed_tokens: int, concurrent_decoders: int) -> float:
+        """Decode time other sessions lose while this prefill runs.
+
+        Each concurrent decoder loses the whole prefill duration, so the cost
+        charged to the system is the duration times how many sessions were
+        waiting.
+        """
+        if concurrent_decoders < 0:
+            raise ValueError("concurrent_decoders must be non-negative")
+        return self.prefill_s(computed_tokens) * concurrent_decoders
+
+
+@dataclass(frozen=True)
 class HitFormula:
     """Prefix-cache hit length as a function of the shared prefix.
 
@@ -137,11 +184,15 @@ class SubstrateDescriptor:
     inner_eviction_policy: str
     hit_formula: HitFormula
     kv_pool_tokens: int
+    prefill_cost_model: PrefillCostModel | None = None
+    """Set when prefill is known to run exclusively. ``None`` means the
+    substrate has not been measured for it, not that prefill is free."""
     provenance: Mapping[str, Provenance] = field(default_factory=dict)
     notes: tuple[str, ...] = ()
 
     #: Fields that describe the substrate and therefore require provenance.
     _UNATTRIBUTED = frozenset({"name", "provenance", "notes"})
+    _OPTIONAL = frozenset({"prefill_cost_model"})
 
     def __post_init__(self) -> None:
         if not self.bucket_sizes:
@@ -169,7 +220,9 @@ class SubstrateDescriptor:
         missing = [
             f.name
             for f in fields(self)
-            if f.name not in self._UNATTRIBUTED and f.name not in self.provenance
+            if f.name not in self._UNATTRIBUTED
+            and f.name not in self.provenance
+            and not (f.name in self._OPTIONAL and getattr(self, f.name) is None)
         ]
         if missing:
             raise ValueError(f"missing provenance for: {sorted(missing)}")

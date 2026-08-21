@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src"))
 
 from continuum.substrate import (  # noqa: E402
     HitFormula,
+    PrefillCostModel,
     Provenance,
     StepCostModel,
     SubstrateDescriptor,
@@ -42,6 +43,15 @@ STEP_COST = StepCostModel(
 
 HIT_FORMULA = HitFormula(block_tokens=128, reserve_last_query_token=True)
 
+# Prefill runs exclusively on this stack, so its duration is charged to every
+# session that was decoding at the time. Fitted in TASK22 on four points
+# (500 / 2000 / 2008 / 6000 computed tokens); worst residual 2.4 ms.
+PREFILL_COST = PrefillCostModel(
+    chunk_tokens=128,
+    per_chunk_s=0.021206,
+    drift_s_per_token=6.399e-07,
+)
+
 RBLN_CA25_VLLM_RBLN_0111 = SubstrateDescriptor(
     name="RBLN-CA25 / vllm-rbln 0.11.1 / Qwen3-4B b8 s8192 d4 multi-bucket",
     bucket_sizes=(1, 2, 4, 8),
@@ -54,6 +64,7 @@ RBLN_CA25_VLLM_RBLN_0111 = SubstrateDescriptor(
     inner_eviction_policy="lru",
     hit_formula=HIT_FORMULA,
     kv_pool_tokens=8 * 8192,
+    prefill_cost_model=PREFILL_COST,
     provenance={
         "bucket_sizes": Provenance(
             "stack", "TASK13", "measured",
@@ -95,6 +106,12 @@ RBLN_CA25_VLLM_RBLN_0111 = SubstrateDescriptor(
             "floor(min(shared, query-1)/128)*128 matched 10/10 conditions. The "
             "shape is vLLM's; the block size is instance level",
         ),
+        "prefill_cost_model": Provenance(
+            "silicon", "TASK22", "measured",
+            "prefill stalls every concurrent decoder for its whole duration; "
+            "spike/prefill_time observed at 1.01-1.14 across three injection "
+            "sizes. Absolute timings are hardware and model specific",
+        ),
         "kv_pool_tokens": Provenance(
             "stack", "TASK14", "derived",
             "outer_slot_count * outer_slot_tokens. vLLM separately reports "
@@ -103,6 +120,9 @@ RBLN_CA25_VLLM_RBLN_0111 = SubstrateDescriptor(
         ),
     },
     notes=(
+        "Adding the prefill serialization term closes the TASK20 cost-model "
+        "gap: predicted/measured ITL sum moves from 0.57-0.86 to 0.97-1.04 "
+        "across every (N, arm) cell.",
         "Reuse cliff observed at background_requests = 7 and reproduced 12/12 "
         "in TASK15; survives_gap() encodes the law candidate that explains it.",
         "vllm:prefix_cache_hits_total reports the inner-block layer and can "
