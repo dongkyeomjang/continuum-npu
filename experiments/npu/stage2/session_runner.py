@@ -29,6 +29,7 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src"))
+from continuum.policy import ReturnState, build as build_policy  # noqa: E402
 from continuum.workload.agentic import (  # noqa: E402
     Distribution,
     generate_sessions,
@@ -36,6 +37,80 @@ from continuum.workload.agentic import (  # noqa: E402
     set_uniform_gaps,
     zero_gaps,
 )
+
+
+class ReturnGate:
+    """Hold ready returns until the policy releases them.
+
+    One shared object rather than per-thread timers, because every policy
+    reads counts that span sessions: how many requests are outstanding and how
+    many returns are waiting. A session thread announces that its tool gap has
+    ended and blocks here; whoever changes the state -- a request completing,
+    another return arriving, a timeout expiring -- re-evaluates every waiter.
+
+    The policy object is the same class the simulator runs, so a difference
+    between predicted and measured gain cannot be an implementation mismatch.
+    """
+
+    def __init__(self, policy, budget_s: float, origin: float) -> None:
+        self._policy = policy
+        self._budget_s = budget_s
+        self._origin = origin
+        self._cv = threading.Condition()
+        self._in_flight = 0
+        self._ready: dict[int, float] = {}
+        self._released: set[int] = set()
+
+    def _now(self) -> float:
+        return time.perf_counter() - self._origin
+
+    def sent(self) -> None:
+        with self._cv:
+            self._in_flight += 1
+            self._cv.notify_all()
+
+    def done(self) -> None:
+        with self._cv:
+            self._in_flight -= 1
+            self._cv.notify_all()
+
+    def _evaluate_locked(self, now: float) -> None:
+        held = len(self._ready) - len(self._released)
+        if held <= 0:
+            return
+        for sid, ready_at in list(self._ready.items()):
+            if sid in self._released:
+                continue
+            waited = now - ready_at
+            if waited >= self._budget_s:
+                self._released.add(sid)
+                continue
+            st = ReturnState(now_s=now, in_flight=self._in_flight, held=held,
+                             waited_s=waited, budget_s=self._budget_s)
+            if self._policy.release(st):
+                self._released.add(sid)
+
+    def wait_for_release(self, session_index: int) -> float:
+        """Block until this session's return is allowed. Returns the hold in seconds."""
+        with self._cv:
+            ready_at = self._now()
+            self._ready[session_index] = ready_at
+            self._cv.notify_all()
+            while True:
+                now = self._now()
+                self._evaluate_locked(now)
+                if session_index in self._released:
+                    self._ready.pop(session_index, None)
+                    self._released.discard(session_index)
+                    return now - ready_at
+                deadline = ready_at + self._budget_s
+                st = ReturnState(now_s=now, in_flight=self._in_flight,
+                                 held=max(1, len(self._ready) - len(self._released)),
+                                 waited_s=now - ready_at, budget_s=self._budget_s)
+                nxt = self._policy.next_check_s(st)
+                wake = deadline if nxt is None else min(deadline, nxt)
+                timeout = max(0.0005, wake - now)
+                self._cv.wait(timeout)
 
 WORDS = (
     "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima "
@@ -118,6 +193,13 @@ def main() -> int:
     p.add_argument("--base-seed", type=int, required=True)
     p.add_argument("--block-id", required=True)
     p.add_argument("--sampling-seed", type=int, required=True)
+    p.add_argument("--return-policy", default="immediate",
+                   help="immediate | quantize:<s> | topup | freeslot. Holds the "
+                        "*return* of a turn after its tool gap, never turn 0")
+    p.add_argument("--return-budget-s", type=float, default=0.0,
+                   help="latency budget the policy is bounded by")
+    p.add_argument("--buckets", default="1,2,4,8",
+                   help="compiled decoder buckets the policy reasons about")
     p.add_argument("--output-dir", required=True, type=Path)
     args = p.parse_args()
 
@@ -185,6 +267,14 @@ def main() -> int:
     rows_path.write_text("")
     origin = time.perf_counter()
 
+    buckets = tuple(int(x) for x in args.buckets.split(","))
+    gate = None
+    if args.return_policy != "immediate":
+        if args.return_budget_s <= 0:
+            raise SystemExit("--return-budget-s must be positive with a policy")
+        gate = ReturnGate(build_policy(args.return_policy, bucket_sizes=buckets),
+                          args.return_budget_s, origin)
+
     def emit(row: dict) -> None:
         with _write_lock:
             with rows_path.open("a") as fh:
@@ -193,13 +283,21 @@ def main() -> int:
     def run_session(pair) -> None:
         idx, sess = pair
         context = ""
+        held_s = 0.0
         for turn in sess.turns:
             segment = build_exact(tok, turn.new_segment_tokens, turn.text_seed)
             prompt = (context + " " + segment).strip() if context else segment
+            # Turn 0 opens the session and is not a return, so no policy sees it.
+            if gate is not None and turn.index > 0:
+                held_s = gate.wait_for_release(idx)
             sent = time.perf_counter() - origin
+            if gate is not None:
+                gate.sent()
             r = completion(base, model_id, prompt, turn.generation_tokens,
                            args.sampling_seed)
             done = time.perf_counter() - origin
+            if gate is not None:
+                gate.done()
             body = r["body"]
             usage = body.get("usage") if isinstance(body, dict) else None
             details = (usage or {}).get("prompt_tokens_details") or {}
@@ -219,12 +317,14 @@ def main() -> int:
                 "requested_generation_tokens": turn.generation_tokens,
                 "requested_segment_tokens": turn.new_segment_tokens,
                 "gap_after_s": turn.gap_after_s,
+                "held_s": held_s,
                 "prompt_tokens": (usage or {}).get("prompt_tokens"),
                 "completion_tokens": (usage or {}).get("completion_tokens"),
                 "cached_tokens": details.get("cached_tokens", 0),
                 "at_utc": datetime.now(timezone.utc).isoformat(),
             })
             context = prompt + text
+            held_s = 0.0
             if turn.gap_after_s > 0:
                 time.sleep(turn.gap_after_s)
 
@@ -242,6 +342,9 @@ def main() -> int:
         "plan": plan_summary(sessions),
         "zero_gaps": args.zero_gaps,
         "sync_gaps": args.sync_gaps,
+        "return_policy": args.return_policy,
+        "return_budget_s": args.return_budget_s,
+        "buckets": list(buckets),
         "total_gap_s": sum(t.gap_after_s for s in sessions for t in s.turns),
         "rows_file": rows_path.name,
         "started_at_utc": datetime.now(timezone.utc).isoformat(),
