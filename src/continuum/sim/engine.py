@@ -24,6 +24,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import itertools
 
+from ..policy.online import ReturnPolicy, ReturnState
 from ..substrate.descriptor import SubstrateDescriptor
 from ..workload.agentic import Session
 from .cache import Eviction, OuterBlockPool
@@ -44,6 +45,13 @@ class SimConfig:
     arrival_order: str = "session_index"
     """Tie-break for requests that arrive at the same instant."""
 
+    return_policy: ReturnPolicy | None = None
+    """Holds a session's return after its tool gap, if set. ``None`` reproduces
+    the immediate-return behaviour every earlier task measured, bit for bit."""
+
+    return_budget_s: float = 0.0
+    """Latency budget the policy is bounded by. Ignored when no policy is set."""
+
     admission_priority: tuple[int, ...] = ()
     """Session indices in the order simultaneous arrivals should be admitted.
 
@@ -63,6 +71,8 @@ class SimConfig:
             raise ValueError(f"unknown arrival_order {self.arrival_order!r}")
         if len(set(self.admission_priority)) != len(self.admission_priority):
             raise ValueError("admission_priority must not repeat a session")
+        if self.return_budget_s < 0:
+            raise ValueError("return_budget_s must be non-negative")
 
 
 @dataclass
@@ -92,7 +102,13 @@ class RequestRecord:
     cached_tokens: int
     computed_tokens: int
     prefill_s: float
+    ready_s: float = 0.0
+    """When the return became ready. ``arrival_s - ready_s`` is the hold."""
     evicted_sessions: tuple[str, ...] = ()
+
+    @property
+    def held_s(self) -> float:
+        return self.arrival_s - self.ready_s
 
 
 @dataclass
@@ -170,6 +186,10 @@ class _Pending:
     generation_tokens: int
     gap_after_s: float
     arrival_s: float
+    """When the return is actually handed to the server."""
+    ready_s: float
+    """When the tool gap finished, i.e. the earliest a return could be sent.
+    Equal to ``arrival_s`` with no policy; the difference is the hold."""
     seq: int
 
 
@@ -207,7 +227,8 @@ def simulate(
             session=s.session_id, session_index=idx, turn=0,
             prompt_tokens=_prompt_tokens(s, 0),
             generation_tokens=t0.generation_tokens,
-            gap_after_s=t0.gap_after_s, arrival_s=0.0, seq=next(counter),
+            gap_after_s=t0.gap_after_s, arrival_s=0.0, ready_s=0.0,
+            seq=next(counter),
         ))
 
     by_index = {i: s for i, s in enumerate(sessions)}
@@ -232,7 +253,8 @@ def simulate(
             prompt_tokens=r["prompt_tokens"], generation_tokens=r["generation_tokens"],
             arrival_s=r["arrival_s"], admit_s=r["admit_s"], finish_s=at,
             cached_tokens=r["cached_tokens"], computed_tokens=r["computed_tokens"],
-            prefill_s=r["prefill_s"], evicted_sessions=r["evicted"],
+            prefill_s=r["prefill_s"], ready_s=r["ready_s"],
+            evicted_sessions=r["evicted"],
         ))
         sess = by_index[r["session_index"]]
         nxt = r["turn"] + 1
@@ -243,19 +265,73 @@ def simulate(
                 generation_tokens=sess.turns[nxt].generation_tokens,
                 gap_after_s=sess.turns[nxt].gap_after_s,
                 arrival_s=at + r["gap_after_s"] + config.client_overhead_s,
+                ready_s=at + r["gap_after_s"] + config.client_overhead_s,
                 seq=next(counter),
             ))
 
-    while pending or waiting or running:
-        arrived = [p for p in pending if p.arrival_s <= t + 1e-12]
-        if arrived:
-            for p in arrived:
-                pending.remove(p)
-            waiting.extend(arrived)
+    policy = config.return_policy
+    budget = config.return_budget_s
+
+    def _release_ready(now: float) -> None:
+        """Move returns whose hold has ended into the server's queue.
+
+        Turn 0 is never held: a policy governs *returns*, and the opening turn
+        of a session is not one. With no policy every ready return is released
+        at once, which is the behaviour of every task before this one.
+        """
+        ready = [p for p in pending if p.ready_s <= now + 1e-12]
+        if not ready:
+            return
+        if policy is None:
+            release = ready
+        else:
+            in_flight = len(running) + len(waiting)
+            held = len(ready)
+            release = []
+            for p in ready:
+                waited = now - p.ready_s
+                if p.turn == 0 or waited >= budget - 1e-12:
+                    release.append(p)
+                    continue
+                st = ReturnState(now_s=now, in_flight=in_flight, held=held,
+                                 waited_s=waited, budget_s=budget)
+                if policy.release(st):
+                    release.append(p)
+        for p in release:
+            pending.remove(p)
+            if policy is not None:
+                # The hold ended now, so this is when the server sees it. With
+                # no policy the scheduled time is left alone: it is the sort
+                # key for simultaneous admissions, and rewriting it would
+                # silently reorder runs that earlier tasks already published.
+                p.arrival_s = now
+            waiting.append(p)
+        if release:
             waiting.sort(key=_sort_key)
 
+    def _next_wakeup(now: float) -> float:
+        """Earliest future time the release decision could change on its own."""
+        candidates = [p.ready_s for p in pending if p.ready_s > now + 1e-12]
+        if policy is not None:
+            for p in pending:
+                if p.turn == 0:
+                    continue
+                if p.ready_s <= now + 1e-12:
+                    candidates.append(p.ready_s + budget)
+                    st = ReturnState(now_s=now, in_flight=len(running) + len(waiting),
+                                     held=1, waited_s=now - p.ready_s, budget_s=budget)
+                    nxt = policy.next_check_s(st)
+                    if nxt is not None and nxt > now + 1e-12:
+                        candidates.append(nxt)
+        if not candidates:
+            raise RuntimeError("no future event but work remains")
+        return min(candidates)
+
+    while pending or waiting or running:
+        _release_ready(t)
+
         if not waiting and not running:
-            t = min(p.arrival_s for p in pending)
+            t = _next_wakeup(t)
             continue
 
         if waiting and len(running) < config.max_running_requests:
@@ -309,6 +385,7 @@ def simulate(
                 "gap_after_s": p.gap_after_s, "arrival_s": p.arrival_s,
                 "admit_s": t - dur, "cached_tokens": cached,
                 "computed_tokens": computed, "prefill_s": dur,
+                "ready_s": p.ready_s,
                 # Prefill emits the first token, so only the rest are decode steps.
                 "remaining": p.generation_tokens - 1,
                 "evicted": tuple(e.victim_session for e in evicted),
@@ -335,7 +412,7 @@ def simulate(
                 _finish(r, t)
             continue
 
-        t = min(p.arrival_s for p in pending)
+        t = _next_wakeup(t)
 
     records.sort(key=lambda r: (r.session_index, r.turn))
     return SimResult(steps=steps, requests=records, wall_clock_s=t,
