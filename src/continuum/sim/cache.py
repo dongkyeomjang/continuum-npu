@@ -14,6 +14,7 @@ eviction order all come from the descriptor.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import math
 
 
 @dataclass
@@ -33,6 +34,9 @@ class Entry:
     """True while a running request holds it; inactive blocks are evictable."""
     order: int
     """Allocation sequence number. FIFO eviction reads this, not last use."""
+    last_touch: int = 0
+    """Sequence number of the most recent hit or allocation. Only an LRU
+    policy reads this; the measured substrate never does."""
 
 
 @dataclass
@@ -73,9 +77,10 @@ class OuterBlockPool:
         return [e for e in self.entries.values() if not e.active]
 
     def _victim_order(self, entry: Entry) -> int:
-        # FIFO reads allocation order. LRU would read last-touch order, which
-        # this pool does not track because the measured substrate never uses it.
-        return entry.order
+        # FIFO reads allocation order; LRU reads last use. The measured
+        # substrate hardcodes FIFO, so LRU exists here only to be switched on
+        # in an ablation -- what it produces is a model, not a measurement.
+        return entry.last_touch if self.policy == "lru" else entry.order
 
     # -- operations ---------------------------------------------------------
 
@@ -139,13 +144,14 @@ class OuterBlockPool:
         for e in self.entries.values():
             if e.session_key == session_key:
                 hit_prefix = max(hit_prefix, e.cached_prefix_tokens)
+                e.last_touch = self._next_order
 
         free_ids = [b for b in range(self.capacity) if b not in self.entries]
         for block_id in free_ids[:blocks_needed]:
             self.entries[block_id] = Entry(
                 block_id=block_id, session_key=session_key,
                 cached_prefix_tokens=prompt_tokens, active=True,
-                order=self._next_order,
+                order=self._next_order, last_touch=self._next_order,
             )
             self._next_order += 1
         return hit_prefix, evicted
@@ -157,4 +163,117 @@ class OuterBlockPool:
         admission has already chosen its eviction victim. See the module
         docstring for why the lag is load-bearing rather than cosmetic.
         """
+        self._pending_release.append(session_key)
+
+
+@dataclass
+class GranularPool:
+    """Ablation pool: many small blocks, reclaimed one at a time.
+
+    The measured substrate holds one whole sequence per block and evicts whole
+    blocks, so losing a prefix is all-or-nothing. A stack whose cache is
+    reclaimed at the granularity it is *indexed* at loses prefixes gradually
+    instead: evict the block covering tokens 900-1024 and the first 896 tokens
+    are still reusable.
+
+    This class exists to compute what that changes. It is not a model of
+    anything measured here, and nothing produced with it may be reported as an
+    observation of this substrate.
+
+    A hit requires an unbroken run from the start of the prefix: block *j* is
+    only usable if every block before it is too, which is what makes the
+    difference show up as a decay curve rather than a cliff.
+    """
+
+    capacity: int
+    """Blocks in the pool."""
+    block_tokens: int
+    policy: str = "lru"
+    evictions: list[Eviction] = field(default_factory=list)
+    #: session -> ordered list of block ids holding its prefix, index 0 first.
+    _chains: dict[str, list[int]] = field(default_factory=dict)
+    #: block id -> (session, position in that session's chain, active, order, touch)
+    _blocks: dict[int, tuple[str, int, bool, int, int]] = field(default_factory=dict)
+    _next_order: int = 0
+    _pending_release: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if self.capacity <= 0 or self.block_tokens <= 0:
+            raise ValueError("capacity and block_tokens must be positive")
+        if self.policy not in ("fifo", "lru"):
+            raise ValueError(f"unsupported eviction policy {self.policy!r}")
+
+    @property
+    def free_count(self) -> int:
+        return self.capacity - len(self._blocks)
+
+    def _evictable(self) -> list[int]:
+        return [b for b, v in self._blocks.items() if not v[2]]
+
+    def _key(self, b: int) -> tuple[int, int]:
+        """Eviction order: least recent first, and within one request its tail.
+
+        The tail-first tie-break is not an invention. vLLM's free-block queue
+        documents exactly this ordering -- "if two blocks have the same last
+        accessed time (allocated by the same sequence), the one with more hash
+        tokens (the tail of a block chain) is at the front"
+        (``vllm/v1/core/kv_cache_utils.py``, ``FreeKVCacheBlockQueue``). It is
+        what turns prefix loss into a decay: the end of a prefix goes first and
+        the beginning survives longest.
+        """
+        session, pos, active, order, touch = self._blocks[b]
+        base = touch if self.policy == "lru" else order
+        return (base, -pos)
+
+    def blocks_for(self, tokens: int) -> int:
+        return max(1, math.ceil(tokens / self.block_tokens))
+
+    def can_admit(self, blocks_needed: int) -> bool:
+        return self.free_count + len(self._evictable()) >= blocks_needed
+
+    def settle(self) -> None:
+        for key in self._pending_release:
+            for b, (s, pos, active, order, touch) in list(self._blocks.items()):
+                if active and s == key:
+                    self._blocks[b] = (s, pos, False, order, touch)
+        self._pending_release.clear()
+
+    def _drop(self, block_id: int, by: str) -> None:
+        s, pos, _, _, _ = self._blocks.pop(block_id)
+        chain = self._chains.get(s)
+        if chain is not None and pos < len(chain) and chain[pos] == block_id:
+            # A prefix is only reusable up to its first hole.
+            del chain[pos:]
+            if not chain:
+                self._chains.pop(s, None)
+        self.evictions.append(Eviction(victim_session=s, block_id=block_id, by_session=by))
+
+    def admit(self, *, session_key: str, blocks_needed: int,
+              prompt_tokens: int) -> tuple[int, list[Eviction]]:
+        before = len(self.evictions)
+        shortfall = blocks_needed - self.free_count
+        if shortfall > 0:
+            victims = sorted(self._evictable(), key=self._key)[:shortfall]
+            if len(victims) < shortfall:
+                raise RuntimeError("granular pool exhausted")
+            for v in victims:
+                self._drop(v, session_key)
+        self.settle()
+
+        surviving = len(self._chains.get(session_key, []))
+        hit_prefix = surviving * self.block_tokens
+
+        free_ids = [b for b in range(self.capacity) if b not in self._blocks]
+        chain = []
+        # One admission touches all of its blocks at once, so they share a
+        # timestamp and the tail-first tie-break decides among them.
+        stamp = self._next_order
+        self._next_order += 1
+        for i, block_id in enumerate(free_ids[:blocks_needed]):
+            self._blocks[block_id] = (session_key, i, True, stamp, stamp)
+            chain.append(block_id)
+        self._chains[session_key] = chain
+        return hit_prefix, self.evictions[before:]
+
+    def release(self, session_key: str) -> None:
         self._pending_release.append(session_key)

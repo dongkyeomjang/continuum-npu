@@ -4,9 +4,9 @@
 
 ## 현재 상태
 
-현재 연구 단계: Stage 0, Stage 1a, Stage 1b가 모두 `PASS`했고, [TASK11](TASK11.md)에서 prefix cache hit 단위를 **inner block 128 token**으로 확정했다. [TASK12](TASK12.md)에서 결정 3을 집행해 per-step decoder bucket 관측 patch를 적용·검증했고, [TASK13](TASK13.md)에서 decode step 비용을 `f(bucket) + g(actual)`로 분해했다. [TASK14](TASK14.md)에서 prefix-cache 생존 문턱을 실측하고 [TASK15](TASK15.md)에서 12/12 trial로 재현해 실제 재계산까지 확정했다. [TASK16](TASK16.md)에서 substrate descriptor와 층 태깅 규칙으로 "질문은 클래스, 상수는 인스턴스"를 코드·기록 체계에 구조화했고, [TASK17](TASK17.md)에서 agentic workload generator로 bucket 전이를 처음 관측했다. [TASK18](TASK18.md)에서 per-request 귀속 게이트를 통과하고 [TASK19](TASK19.md)에서 첫 짝 비교를, [TASK20](TASK20.md)에서 44 조합 N/slots sweep을 수행했다. **agentic gap의 utilization 효과는 부호가 바뀐다** — N이 compiled bucket 사이에 끼면(N=6) 오히려 15 % 높고, N=10–12에서 9 % 낮다. [TASK21](TASK21.md)에서 총 gap 시간을 고정하고 분산만 바꿔 재사용률이 움직임을 관측했다(DISPERSED 11/24 vs SYNC 7/24, 반대 방향 0블록이나 동률 1블록으로 `INCONCLUSIVE`). [TASK22](TASK22.md)에서 prefill 배타 실행을 직접 관측해 비용 모형 v2를 세웠고, [TASK23](TASK23.md)에서 **bucket 격자를 재compile로 바꾸는 개입으로 부호 역전의 원인을 확정했다** — bucket 6을 추가하자 N=6의 역전(pooled 1.1504)이 소멸했다(0.9717). [TASK24](TASK24.md)에서 **step 수준 시뮬레이터**를 세워 보정 파라미터 없이 기존 80조합을 재현했고(utilization 평균절대오차 0.0066, pooled ratio 방향 11/11), 닫힌 식이 설명하지 못하던 N=4·N=5 이상치의 기전을 감쇠 경로로 밝혔다. [TASK25](TASK25.md)에서 그 시뮬레이터의 **out-of-sample 예측력이 선등록 게이트를 통과했다** — 측정 전에 commit한 pooled ratio 3개가 최대 오차 0.0040으로 맞았다(허용치 ±0.05). [TASK26](TASK26.md)에서 그 위에 offline oracle을 올려 **반환 시점 재배치에 실질적 headroom이 있음**(ε=0.5 s에 1.2–4.4 %, ε=5 s에 9.7–27.2 %)을 계산했고, 동시에 **utilization이 비용 지표가 아니라는 것**을 확인했다. [TASK27](TASK27.md)에서 그 headroom이 **단순 causal 정책으로는 회수되지 않음**을 계산으로 확정했고, [TASK28](TASK28.md)에서 그 계산이 **실기기에서 재현됐다** — 측정 전 commit한 device time ratio가 확증 구간 2/2에서 허용치 안이며(오차 +0.018·+0.021), 회수율 X는 N=6 −105 %, N=8 −70 %다. headroom은 조정이 아니라 **예지**에서 나온다.
+현재 연구 단계: Stage 0, Stage 1a, Stage 1b가 모두 `PASS`했고, [TASK11](TASK11.md)에서 prefix cache hit 단위를 **inner block 128 token**으로 확정했다. [TASK12](TASK12.md)에서 결정 3을 집행해 per-step decoder bucket 관측 patch를 적용·검증했고, [TASK13](TASK13.md)에서 decode step 비용을 `f(bucket) + g(actual)`로 분해했다. [TASK14](TASK14.md)에서 prefix-cache 생존 문턱을 실측하고 [TASK15](TASK15.md)에서 12/12 trial로 재현해 실제 재계산까지 확정했다. [TASK16](TASK16.md)에서 substrate descriptor와 층 태깅 규칙으로 "질문은 클래스, 상수는 인스턴스"를 코드·기록 체계에 구조화했고, [TASK17](TASK17.md)에서 agentic workload generator로 bucket 전이를 처음 관측했다. [TASK18](TASK18.md)에서 per-request 귀속 게이트를 통과하고 [TASK19](TASK19.md)에서 첫 짝 비교를, [TASK20](TASK20.md)에서 44 조합 N/slots sweep을 수행했다. **agentic gap의 utilization 효과는 부호가 바뀐다** — N이 compiled bucket 사이에 끼면(N=6) 오히려 15 % 높고, N=10–12에서 9 % 낮다. [TASK21](TASK21.md)에서 총 gap 시간을 고정하고 분산만 바꿔 재사용률이 움직임을 관측했다(DISPERSED 11/24 vs SYNC 7/24, 반대 방향 0블록이나 동률 1블록으로 `INCONCLUSIVE`). [TASK22](TASK22.md)에서 prefill 배타 실행을 직접 관측해 비용 모형 v2를 세웠고, [TASK23](TASK23.md)에서 **bucket 격자를 재compile로 바꾸는 개입으로 부호 역전의 원인을 확정했다** — bucket 6을 추가하자 N=6의 역전(pooled 1.1504)이 소멸했다(0.9717). [TASK24](TASK24.md)에서 **step 수준 시뮬레이터**를 세워 보정 파라미터 없이 기존 80조합을 재현했고(utilization 평균절대오차 0.0066, pooled ratio 방향 11/11), 닫힌 식이 설명하지 못하던 N=4·N=5 이상치의 기전을 감쇠 경로로 밝혔다. [TASK25](TASK25.md)에서 그 시뮬레이터의 **out-of-sample 예측력이 선등록 게이트를 통과했다** — 측정 전에 commit한 pooled ratio 3개가 최대 오차 0.0040으로 맞았다(허용치 ±0.05). [TASK26](TASK26.md)에서 그 위에 offline oracle을 올려 **반환 시점 재배치에 실질적 headroom이 있음**(ε=0.5 s에 1.2–4.4 %, ε=5 s에 9.7–27.2 %)을 계산했고, 동시에 **utilization이 비용 지표가 아니라는 것**을 확인했다. [TASK27](TASK27.md)에서 그 headroom이 **단순 causal 정책으로는 회수되지 않음**을 계산으로 확정했고, [TASK28](TASK28.md)에서 그 계산이 **실기기에서 재현됐다** — 측정 전 commit한 device time ratio가 확증 구간 2/2에서 허용치 안이며(오차 +0.018·+0.021), 회수율 X는 N=6 −105 %, N=8 −70 %다. headroom은 조정이 아니라 **예지**에서 나온다. [TASK29](TASK29.md)에서 기전 3개를 절제해 귀속을 확인했다 — 격자 법칙은 연속 격자에서 1.0000으로 소멸하지만 **GPU cudagraph 격자에서는 소멸하지 않고**, 재사용 절벽의 "개수 문턱"은 시퀀스 단위 FIFO의 산물이며, chunked prefill은 정지를 없애면서 device time을 3–10 % **늘린다**.
 
-가장 최근 TASK: [TASK28](TASK28.md) — causal 반환 정책의 실기기 검증 (`DONE`)
+가장 최근 TASK: [TASK29](TASK29.md) — 기전 절제 분석과 결정 5 기록 (`DONE`)
 
 "가장 최근 TASK"는 번호가 가장 큰 TASK다. 그 TASK의 상태가 `BLOCKED`, `PARTIAL`, `FAILED`, `INVALID` 중 하나여서 최근 진척을 대표하지 못할 때만 아래에 "최근 완료 TASK"(가장 번호가 큰 `DONE` TASK)를 별도로 한 줄 추가한다. 두 줄이 같은 TASK를 가리키면 한 줄만 남긴다.
 
@@ -24,6 +24,8 @@ Stage 1 이후 설계에 제약이 되는 관측 (근거 [TASK06](TASK06.md), [T
 - **bucket 격자 정렬이 gap 효과의 부호를 결정한다** ([TASK23](TASK23.md), 개입으로 확인). `padding_slots(N) = bucket_for(N) − N`이 있으면 AGENTIC이 유리하고 0이면 불리하다. 워크로드·seed·모델·slot 수를 고정하고 격자에 bucket 6만 추가하자 N=6 pooled ratio가 1.1504 → 0.9717로 내려가 역전이 소멸했다. **법칙의 형태는 `class`, 격자·문턱·크기는 `stack`**이다. **크기 모형은 [TASK24](TASK24.md)의 시뮬레이터가 대신하며 [TASK25](TASK25.md)에서 예측력이 검증됐다** — `padding_slots(N)`은 정상 상태만 가격을 매기므로 실제 padding의 **하한**이며, 단조성이 N=4·N=5에서 깨지는 것은 batch가 N→1로 내려가는 **감쇠 경로**의 padding 때문이다.
 - **decode step 비용 모형** ([TASK13](TASK13.md), 정상 상태 한정): `step_time ≈ f(bucket) + g(actual)`. `f`는 계단 함수로 model p50이 bucket 1/2/4/8에서 9.51 / 10.05 / 10.355 / 12.4025 ms이고 같은 bucket 내 범위는 0.01–0.03 ms다. `g`는 model·sampler 밖 engine overhead로 요청당 약 0.041 ms다. bucket 효과가 지배 항이므로 slot 낭비율은 시간 의미를 갖되 "bucket 한 단계 비용"으로 읽는다. `VLLM_RBLN_DECODE_BATCH_BUCKET_*`와 `VLLM_RBLN_SUB_BLOCK_CACHE`는 기본 경로에서 무효다.
 - `num_gpu_blocks`는 frontend가 EngineCore 보고값을 누적하는 구조(`vllm/v1/engine/core_client.py:712`) 때문에 EngineCore 값의 2배로 나온다([TASK09](TASK09.md)에서 해소). 실제 KV pool은 EngineCore 값이다. `"GPU KV cache size: N tokens"` log는 `num_blocks × block_size`가 아니라 `max_concurrency × max_model_len`이다.
+- **격자 정렬 법칙은 GPU에서도 소멸하지 않을 것으로 계산된다** ([TASK29](TASK29.md), **모형 진술**). vLLM의 cudagraph capture size 기본 목록은 `max_num_seqs=8`에서 `[1,2,4,8,16]`(`vllm/config/compilation.py:676–690`)이고 유효 구간이 NPU 격자와 같아 pooled ratio가 동일하다. 연속 격자에서만 1.0000으로 소멸한다. **GPU 대비에서 재야 할 축은 accelerator가 아니라 `max_num_seqs`다.**
+- **prefill 배타 실행은 순수 비용이 아니라 일부는 batching 보조금이다** ([TASK29](TASK29.md), **모형 진술**). chunked로 바꾸면 정지 항이 0이 되지만 device time이 3–10 % **늘어난다** — 배타 실행이 decoder를 멈춰 세워 강제 동기화시키고 재개 시 더 넓은 batch를 만들고 있었다.
 - **offline headroom은 예지에서 나오며 단순 causal 정책으로 회수되지 않는다** ([TASK27](TASK27.md), [TASK28](TASK28.md)에서 실기기 확인, 회수율 X = −105 %·−70 %). oracle은 세션의 47 %를 보류하지 않고 소수만 예산 끝까지 붙드는데, 어느 소수인지는 **동료의 복귀 시점**에 달려 있다. 현재 상태만 보는 정책(`QUANTIZE`/`TOPUP`/`FREESLOT`)은 전부 평균 절감이 음수다. **"조금 기다렸다 같이 보낸다"는 직관은 이 substrate에서 틀렸다.**
 - **utilization은 비용 지표가 아니다** ([TASK26](TASK26.md)). 작업량이 보존되는 재배치에서 slot 점유율과 device time은 반대로 움직인다 — utilization을 최대화한 일정이 device time을 11–37 % 더 쓴다. 실측 arm 비교에서도 방향이 5/11 어긋난다(AGENTIC은 11/11에서 device time을 더 쓰는데 utilization ratio는 5개에서 낫다고 말한다). **[TASK19](TASK19.md)–[TASK25](TASK25.md)의 utilization ratio 결과는 그대로 유효하되 정책 목적함수로 쓰지 않는다.**
 - 채택 가능한 관측 신호([TASK09](TASK09.md), [TASK11](TASK11.md) 감사): `vllm:num_requests_running`, `vllm:num_requests_waiting`, `vllm:kv_cache_usage_perc`(해상도는 inner block, 분모 `num_gpu_blocks−1`), `vllm:prefix_cache_queries_total`·`hits_total`·`prompt_tokens_cached_total`(전부 단위가 요청이 아니라 **token**. **`hits`는 층 1, `cached`는 층 2를 세며 두 값은 층 2가 evict된 뒤 갈라진다** — [TASK15](TASK15.md)), server 주기 로그의 `Running/Waiting/KV usage`, DEBUG 로그의 `[PFX] [CACHE-HIT]`(outer/inner block ID)와 `Allocated/Freed block(s)`. `/metrics` gauge는 반드시 in-flight로 표집하고 metric 이름은 정확히 일치시킨다.
@@ -68,6 +70,7 @@ Stage 1 이후 설계에 제약이 되는 관측 (근거 [TASK06](TASK06.md), [T
 | [TASK19](TASK19.md) | DONE | AGENTIC vs CONVENTIONAL 짝 비교 파일럿 | 1차 측정은 불변식 P1 위반으로 `INVALID` 처리하고(원인: CPython `randrange(0,1)`의 가변 비트 소비) 짝 설계를 구성 기반으로 고쳐 재등록·재측정했다. **방향이 부하에 의존한다**: N=8에서 utilization ratio 0.872(AGENTIC 12.8 % 낮음), N=16에서 1.009(저하 없음). 대기 큐가 gap을 흡수한다. 재사용률은 AGENTIC이 오히려 높았다(3/8 vs 1/8). 사전 예측 5개 중 2개만 적중. |
 | [TASK20](TASK20.md) | DONE | N/slots sweep 본 측정 | 44 조합 전부 `VALID`(`INVALID` 0). **저하 확정은 N=10·12뿐**(pooled 0.910·0.919). N=6은 3블록 전부 **반대 방향**(pooled 1.150) — gap이 batch를 padding 0인 크기로 쪼개 utilization을 올린다. N=8은 5블록 중 4블록만 저하 방향이라 선등록 기준 미달. 재사용률은 N 증가에 단조 감소해 N≥12에서 0. **TASK13 비용 모델이 다중 세션으로 전이되지 않는다**(예측/실측 0.86→0.57). |
 | [TASK21](TASK21.md) | DONE | gap 분산 → 재사용 메커니즘 검증 | 총 gap 시간을 소수점까지 고정하고(P2) 분산만 조작했다. DISPERSED 11/24 vs SYNC 7/24이고 **반대 방향 블록은 0**이나 동률 1블록 때문에 선등록 기준상 `INCONCLUSIVE`다. 도착 순서 서명이 6개 arm-block 중 5개에서 확인됐고 **DISPERSED는 3/3 블록에서 가장 이른 두 도착이 성공**했다. eviction OB 열의 중간 8개가 전 조합에서 FIFO였다. |
+| [TASK29](TASK29.md) | DONE | 기전 절제 분석과 결정 5 기록 | 기전 3개를 시뮬레이터에서 절제해 귀속을 계산했다(**측정 아님, 모형 진술**). ① eviction FIFO·시퀀스 → LRU·index: 문턱의 *성격*이 바뀐다 — 측정은 배경 크기와 무관하게 B=7, 절제는 token 총량에 걸려 61/31/16. ② 격자 → 연속: N=6 1.1523 → **1.0000**으로 완전 소멸. **② ' 격자 → GPU cudagraph `[1,2,4,8,16]`: 소멸하지 않고 소수 넷째 자리까지 동일** — 사전 기대를 뒤집는다. ③ prefill 배타 → chunked: 정지 0이 되지만 device time이 3–10 % **증가** — 배타 실행이 decoder를 강제 동기화해 batch를 넓히고 있었다. GPU 대응 근거는 전부 **설치된 vLLM source**에서 확인했다. |
 | [TASK28](TASK28.md) | DONE | causal 반환 정책의 실기기 검증 | 선등록(`980f0c7`) 17초 뒤 측정을 시작해 18조합을 쟀다. **확증 구간(N ∈ {6,8}) `PASS` 2/2** — sim 예측 1.0554·1.0332 대 실측 1.0732·1.0541(오차 +0.018·+0.021, 허용 ±0.03), 블록별 순서까지 재현. device time을 **모형 의존·무의존 두 채널**로 재 차이 0.010–0.011로 일치했다. **X(oracle headroom 회수율) = −105 %(N=6), −70 %(N=8)** — 잘못된 정책은 아무것도 안 하는 것보다 headroom만큼 더 나쁠 수 있다. sim이 보류 손해를 **계통적으로 과소평가**한다(블록 6/6 동방향). 18/18 `VALID`. |
 | [TASK27](TASK27.md) | DONE | causal 반환 스케줄링 정책의 시뮬레이터 평가 | 정책 4종(`IMMEDIATE`/`QUANTIZE(τ)`/`TOPUP`/`FREESLOT`)을 시뮬레이터와 실측 client가 **같은 코드**로 쓰도록 구현하고 평가했다. **어느 것도 device time을 평균적으로 개선하지 못한다** — 6 seed × 24칸에서 `FREESLOT`이 −0.44 %로 가장 중립이고 `QUANTIZE`는 ε이 클수록 −10 %까지 나빠진다. [TASK26](TASK26.md) plan만 보면 `FREESLOT`이 34 % 회수로 보였으나 **신규 seed에서 부호가 뒤집혀** 선택 편향이었음이 드러났다. 기전: oracle은 세션의 47 %를 놓아 두고 소수만 붙드는 **선택적** 보류인데 causal 정책은 83 %를 조금씩 붙드는 **무차별** 보류다. 정책 축에서도 utilization은 비용과 반대로 간다. |
 | [TASK26](TASK26.md) | DONE | 반환 시점 재배치의 offline oracle bound | 검증된 시뮬레이터 위에서 hold 벡터를 탐색했다. **policy headroom이 있다** — device time이 ε=0.5 s에 1.2–4.4 %, ε=5 s에 9.7–27.2 % 줄어든다(국소 탐색이므로 하한). 이득의 원천은 사전에 지목한 셋(padding·재사용·정지 군집화)이 아니라 **동시성 집중**이며, N=6에서 96 %, N=12에서는 재계산 절감이 57 %다. **utilization을 목적함수로 쓰면 device time이 11–37 % 나빠진다.** 실측 히스토그램으로 다시 읽으면 AGENTIC은 11/11에서 device time을 더 쓰는데 utilization ratio는 5/11에서 반대로 말한다. |
@@ -81,9 +84,20 @@ Stage 1 이후 설계에 제약이 되는 관측 (근거 [TASK06](TASK06.md), [T
 
 이 절은 agent가 임의로 진행할 수 없고 사용자 판정이 필요한 결정의 단일 출처다. 현재 미해결 항목은 없다. 각 항목은 결정 ID, 질문, 선택지, 선택지별 근거·비용·미지수, 권고안, 관련 TASK를 갖는다. 권고안은 제안일 뿐이며 판정은 사용자가 한다. 결정이 내려지면 항목을 "해소됨"으로 표시하고 근거 TASK를 링크한다.
 
+### 결정 5 — 시스템 명칭 충돌
+
+- 상태: `해소됨` — **논문 조립 단계에서 시스템 명칭을 변경한다. repo 개명은 지금 하지 않는다** (2026-08-22)
+- 사유: Berkeley의 동명 시스템 **Continuum**(arXiv 2511.02230)이 존재한다. 이름이 겹친 채로 투고하면 선행 시스템과 혼동되고, 검색·인용에서 이 연구가 그쪽에 묻힌다
+- 적용 범위: **논문 본문·시스템 이름·figure 라벨.** 저장소 경로(`/home/rebel/continuum-npu`), Python package 이름(`src/continuum/`), 기존 TASK 문서의 서술은 **그대로 둔다** — 지금 개명하면 [TASK01](TASK01.md) 이래의 artifact path와 재현 정보가 전부 어긋난다
+- 시점: 논문 조립을 시작할 때. **그 전까지 이 항목은 기록으로만 유지한다**
+- 후속: 명칭 확정 시 이 절에 새 이름과 확정 날짜를 추가한다
+
 ### 결정 4 — GPU(A6000) 교차검증 착수 시점
 
-- 상태: `해소됨` — **(b) offline oracle bound 완료 후 착수** (사용자 판정, 2026-08-21). **착수 조건은 [TASK26](TASK26.md) 완료로 충족됐다.** Advisor의 GPU read-only 감사 지시문 발행을 기다린다
+- 상태: `해소됨` — **(b) offline oracle bound 완료 후 착수** (사용자 판정, 2026-08-21)
+- **개정 (2026-08-22, [TASK29](TASK29.md)): GPU 실측은 취소가 아니라 조건부 이연이다.** 착수 조건([TASK26](TASK26.md) 완료)은 충족됐으나 그 뒤에 두 가지가 바뀌었다. (1) [TASK25](TASK25.md)·[TASK28](TASK28.md)에서 **검증된 시뮬레이터를 확보**해 반사실 계산이 가능해졌고, (2) GPU 측 대응 사실(LRU·block 단위 회수, chunked prefill 기본, cudagraph capture size 격자)이 **설치된 vLLM source에서 직접 확립**됐다([TASK29](TASK29.md) 인용 목록). 따라서 **본 학회 리뷰가 요구할 때 최소 범위(생존 곡선 1실험)로 재개**한다
+- **재개 시 범위가 왜 생존 곡선 1건인가**: [TASK29](TASK29.md) 절제에서 축 ②(격자)는 source 사실로 대부분 닫히고 축 ③(prefill)은 부호 방향이 분명한 반면, **축 ①의 문턱 위치만 실측 없이 값을 말할 수 없다**
+- **[TASK29](TASK29.md)가 비교축 ②의 기대를 뒤집었다**: `max_num_seqs = 8`에서 GPU의 cudagraph 격자 `[1,2,4,8,16]`은 유효 구간이 NPU 격자와 **동일**하므로 격자 정렬 법칙이 **소멸하지 않는다**. GPU 실험을 한다면 재야 할 축은 accelerator가 아니라 **`max_num_seqs`** 다
 - 질문: 보편성 실증을 위한 GPU 교차검증(read-only 감사 → GPU-Stage 0 → 비교 실험)을 언제 시작하는가?
 - 선택지와 판정 근거
 
@@ -93,14 +107,14 @@ Stage 1 이후 설계에 제약이 되는 관측 (근거 [TASK06](TASK06.md), [T
 | **(b) oracle bound 이후** | **채택.** NPU 측 비교축(재사용 절벽·격자 정렬 법칙·prefill 직렬화)이 완성된 상태에서 GPU를 **검증 전용으로 압축 진행**한다 |
 | (c) 포기하고 시뮬레이터 감도 분석으로 대체 | 기각 |
 
-- 후속: `TASK26` 완료 보고 시 Advisor가 GPU read-only 감사 지시문(기 작성분)을 갱신해 발행한다. **그 전까지 GPU 서버 관련 작업을 시작하지 않는다.**
+- 후속: **개정 전 조항** — "`TASK26` 완료 보고 시 Advisor가 GPU read-only 감사 지시문을 갱신해 발행한다". 개정 후에는 **본 학회 리뷰가 GPU 근거를 요구할 때** Advisor가 최소 범위 지시문을 발행한다. **어느 경우든 지시문 발행 전까지 GPU 서버 관련 작업을 시작하지 않는다.**
 - 비교축 예정 (참고, hypothesis이며 판정이 아니다)
 
 | # | 축 | NPU 측 기준선 | GPU에서 볼 것 |
 |---|---|---|---|
-| ① | 생존 함수의 **형태** | FIFO outer-slot 절벽 ([TASK14](TASK14.md), [TASK15](TASK15.md)) | LRU token 단위 감쇠로 바뀌는가 |
-| ② | 격자 정렬 법칙 | bucket 격자 ([TASK23](TASK23.md)) | cudagraph capture size 축에서 재현되는가 |
-| ③ | prefill 직렬화 세금 | 배타 실행 ([TASK22](TASK22.md)) | chunked prefill·mixed batch에서 약화되는가 |
+| ① | 생존 함수의 **형태** | FIFO outer-slot 절벽 ([TASK14](TASK14.md), [TASK15](TASK15.md)) | **문턱이 요청 개수가 아니라 token 총량의 함수가 되는가.** [TASK29](TASK29.md) 계산은 그렇다고 말하며, **세 축 중 실측 없이 값을 말할 수 없는 유일한 축**이다 |
+| ② | 격자 정렬 법칙 | bucket 격자 ([TASK23](TASK23.md)) | ~~cudagraph capture size 축에서 재현되는가~~ → **[TASK29](TASK29.md) 계산: `max_num_seqs`가 같으면 재현된다.** 재야 할 축은 accelerator가 아니라 `max_num_seqs` |
+| ③ | prefill 직렬화 세금 | 배타 실행 ([TASK22](TASK22.md)) | chunked prefill에서 정지가 사라지는가. **[TASK29](TASK29.md) 계산: 정지는 0이 되지만 device time은 3–10 % 늘어난다** — 배타 실행의 일부는 batching 보조금이었다 |
 
 ### 결정 3 — decoder bucket 관측용 hash-guarded observation-only patch 승인
 
@@ -238,6 +252,7 @@ Track A를 진행할 의사가 있다면 승인을 권고한다. 변경 규모�
 - TASK26에서 정책 여지를 계산으로 답하고, **판정치로 써 온 utilization이 비용 지표가 아님**을 확인했다 — 측정 축과 최적화 축을 분리해야 한다는 결과다.
 - TASK27에서 그 여지가 **단순 causal 정책의 손이 닿지 않는 곳에 있음**을 확정했다 — headroom의 성격이 조정이 아니라 예지라는 결과이며, 정책 연구의 방향을 바꾼다.
 - TASK28에서 그 결론을 실기기로 확인하고, 동시에 **시뮬레이터가 제어 개입이 들어간 조건까지 예측함**을 확인했다 — 정책 후보를 device가 아니라 계산으로 거를 수 있다는 결과다.
+- TASK29에서 기전 3개를 절제해 각 결과의 귀속을 확인했다 — 개별 관측에서 **substrate 성질과 결과의 인과 사슬**로 넘어간 결과이며, GPU 실측의 최소 범위를 생존 곡선 1건으로 좁혔다.
 - TASK06에서 [STAGE0_PREREG.md](STAGE0_PREREG.md)로 판정 기준을 선등록한 뒤 Stage 0를 실행해 `PASS` 판정했다. `Qwen/Qwen3-4B` revision `1cfa9a72…`를 download(7.507 GiB / 66.8 s)하고 `--batch_size 1 --max_seq_len 8192 --num_devices 4`로 compile(165 s / 9.083 GiB)한 뒤 단일 inference(input 12 token, output 64 token, e2e 0.702 s)를 수행했다.
 - TASK07에서 모든 작업 종료 시 GitHub push 여부를 사용자에게 확인하는 workflow를 도입했다.
 
@@ -253,7 +268,7 @@ Track A를 진행할 의사가 있다면 승인을 권고한다. 변경 규모�
 
 ## 핵심 연구 흐름
 
-Clean-room migration 및 환경 감사 → TASK01 연구 기록 체계 → TASK02 Stage 0 사전 검증(`BLOCKED`) → TASK03 작업 종료 commit workflow → TASK04 workflow 문서 개정 → TASK05 후보 model 조사·환경 재-inventory → TASK06 Stage 0 single inference(`PASS`) → TASK07 작업 종료 push 확인 workflow → TASK08 compile 파라미터·KV accounting source 조사 → TASK09 Stage 1a serving bring-up(`PASS`) → TASK10 Stage 1b multi-bucket compile·동시성(`PASS`) → TASK11 prefix cache hit 경계 확정 → TASK12 decoder bucket 관측 patch 적용·검증 → TASK13 decode step 비용 모형 분해 → TASK14 prefix-cache 생존 문턱 실측 → TASK15 절벽 재현·재계산 attribution 확정 → TASK16 substrate descriptor·층 태깅 → TASK17 agentic workload generator·bucket 전이 관측 → TASK18 per-request 귀속 게이트 통과 → TASK19 AGENTIC vs CONVENTIONAL 짝 비교 파일럿 → TASK20 N/slots sweep 본 측정 → TASK21 gap 분산 메커니즘 검증 → TASK22 prefill 배타 실행 검증·비용 모델 v2 → TASK23 bucket 격자 정렬 법칙 개입 검증 → TASK24 step 수준 시뮬레이터 구축 → TASK25 시뮬레이터 out-of-sample 검증(`PASS`) → TASK26 offline oracle bound → TASK27 causal 정책 평가 → TASK28 정책 실기기 검증(`PASS`) → 기전 절제 분석
+Clean-room migration 및 환경 감사 → TASK01 연구 기록 체계 → TASK02 Stage 0 사전 검증(`BLOCKED`) → TASK03 작업 종료 commit workflow → TASK04 workflow 문서 개정 → TASK05 후보 model 조사·환경 재-inventory → TASK06 Stage 0 single inference(`PASS`) → TASK07 작업 종료 push 확인 workflow → TASK08 compile 파라미터·KV accounting source 조사 → TASK09 Stage 1a serving bring-up(`PASS`) → TASK10 Stage 1b multi-bucket compile·동시성(`PASS`) → TASK11 prefix cache hit 경계 확정 → TASK12 decoder bucket 관측 patch 적용·검증 → TASK13 decode step 비용 모형 분해 → TASK14 prefix-cache 생존 문턱 실측 → TASK15 절벽 재현·재계산 attribution 확정 → TASK16 substrate descriptor·층 태깅 → TASK17 agentic workload generator·bucket 전이 관측 → TASK18 per-request 귀속 게이트 통과 → TASK19 AGENTIC vs CONVENTIONAL 짝 비교 파일럿 → TASK20 N/slots sweep 본 측정 → TASK21 gap 분산 메커니즘 검증 → TASK22 prefill 배타 실행 검증·비용 모델 v2 → TASK23 bucket 격자 정렬 법칙 개입 검증 → TASK24 step 수준 시뮬레이터 구축 → TASK25 시뮬레이터 out-of-sample 검증(`PASS`) → TASK26 offline oracle bound → TASK27 causal 정책 평가 → TASK28 정책 실기기 검증(`PASS`) → TASK29 기전 절제 분석 → 논문 조립(시스템 명칭 변경 포함)
 
 Stage 0–2 observation baseline 전에는 scheduler policy, KEEP/OFFLOAD/RECOMPUTE 또는 host/peer KV parking을 구현하지 않는다.
 
@@ -284,8 +299,9 @@ Legacy GPU 연구 문서는 `docs/legacy/TASK25.md`, `TASK27.md`, `TASK29.md`, `
 
 ## 다음 작업 후보
 
-1. **기전 절제 분석** — GPU 실측을 대체하는 반사실 계산.
+1. **논문 조립** — [결정 5](#결정-5--시스템-명칭-충돌)에 따라 시스템 명칭을 변경한다.
 2. [TASK28](TASK28.md) 발견 3의 계통 편향 원인 규명 — `client_overhead_s`를 실측값으로 넣고 재예측해 설명되는지 확인한다. 새 측정이 필요 없다.
+3. `max_num_seqs` 축에서 격자 정렬 법칙의 크기 변화 계산 ([TASK29](TASK29.md) 발견 3의 후속). 새 측정이 필요 없다.
 3. N ≥ 10 구간의 예측력 검증 — [TASK25](TASK25.md) 격자가 N ≤ 7이라 그 구간은 검증되지 않았고, [TASK24](TASK24.md)는 그곳에서 오차가 5–6배 커진다고 기록했다.
 3. [TASK23](TASK23.md)의 남은 `INCONCLUSIVE` — N=3은 [TASK25](TASK25.md)에서 "역전"으로 확정됐다. N=4·N=7·개입 후 N=6은 효과 크기가 밴드 폭과 비슷해 블록을 늘려 닫힐지 불확실하다.
 4. ε 이득이 실제 device에서 재현되는지의 측정 — hold를 실제로 넣은 실험 ([TASK26](TASK26.md)은 계산이며 측정으로 확인하지 않았다).

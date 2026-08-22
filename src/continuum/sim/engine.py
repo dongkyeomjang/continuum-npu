@@ -27,7 +27,7 @@ import itertools
 from ..policy.online import ReturnPolicy, ReturnState
 from ..substrate.descriptor import SubstrateDescriptor
 from ..workload.agentic import Session
-from .cache import Eviction, OuterBlockPool
+from .cache import Eviction, GranularPool, OuterBlockPool
 
 
 @dataclass(frozen=True)
@@ -52,6 +52,20 @@ class SimConfig:
     return_budget_s: float = 0.0
     """Latency budget the policy is bounded by. Ignored when no policy is set."""
 
+    cache_granularity: str = "outer"
+    """``outer`` reproduces the measured pool: one block per sequence, whole
+    blocks evicted. ``inner`` is an ablation -- many small blocks reclaimed one
+    at a time, so a prefix decays instead of vanishing."""
+
+    eviction_policy: str | None = None
+    """Overrides the descriptor's policy. ``None`` uses what was measured."""
+
+    prefill_exclusive: bool = True
+    """Whether a prefill owns its whole step. The measured substrate does
+    exactly this. Setting it false models a chunked-prefill engine that runs
+    prefill alongside decode, so no session stops -- an ablation, not an
+    observation."""
+
     admission_priority: tuple[int, ...] = ()
     """Session indices in the order simultaneous arrivals should be admitted.
 
@@ -73,6 +87,8 @@ class SimConfig:
             raise ValueError("admission_priority must not repeat a session")
         if self.return_budget_s < 0:
             raise ValueError("return_budget_s must be non-negative")
+        if self.cache_granularity not in ("outer", "inner"):
+            raise ValueError(f"unknown cache_granularity {self.cache_granularity!r}")
 
 
 @dataclass
@@ -214,10 +230,14 @@ def simulate(
             "unmeasured, so a simulation would silently understate the cost"
         )
     prefill_model = descriptor.prefill_cost_model
-    pool = OuterBlockPool(
-        capacity=descriptor.outer_slot_count,
-        policy=descriptor.outer_eviction_policy,
-    )
+    policy_name = config.eviction_policy or descriptor.outer_eviction_policy
+    if config.cache_granularity == "inner":
+        pool = GranularPool(capacity=descriptor.inner_block_count,
+                            block_tokens=descriptor.inner_block_tokens,
+                            policy=policy_name)
+    else:
+        pool = OuterBlockPool(capacity=descriptor.outer_slot_count,
+                              policy=policy_name)
 
     counter = itertools.count()
     pending: list[_Pending] = []
@@ -336,7 +356,9 @@ def simulate(
 
         if waiting and len(running) < config.max_running_requests:
             p = waiting[0]
-            blocks = descriptor.outer_slots_for(p.prompt_tokens)
+            blocks = (pool.blocks_for(p.prompt_tokens)
+                      if isinstance(pool, GranularPool)
+                      else descriptor.outer_slots_for(p.prompt_tokens))
             if not pool.can_admit(blocks):
                 # No room: the scheduler leaves it waiting and decodes instead.
                 # Releases that were deferred for this admission now land.
@@ -373,11 +395,19 @@ def simulate(
             )
             computed = p.prompt_tokens - cached
             dur = prefill_model.prefill_s(computed)
+            stalled = len(running) if config.prefill_exclusive else 0
             steps.append(StepRecord(
-                kind="prefill", start_s=t, duration_s=dur, running=len(running),
+                kind="prefill", start_s=t, duration_s=dur, running=stalled,
                 session=p.session, computed_tokens=computed,
             ))
-            t += dur
+            if config.prefill_exclusive:
+                t += dur
+            else:
+                # Chunked prefill interleaves with decode instead of pre-empting
+                # it. The prefill still costs the device its own time, but the
+                # sessions that were decoding lose nothing, so the decode steps
+                # that follow are not pushed back by it.
+                pass
             r = {
                 "session": p.session, "session_index": p.session_index, "turn": p.turn,
                 "prompt_tokens": p.prompt_tokens,
